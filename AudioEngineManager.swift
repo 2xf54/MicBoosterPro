@@ -2,165 +2,86 @@ import Foundation
 import AVFoundation
 
 class AudioEngineManager: ObservableObject {
-    private var audioEngine = AVAudioEngine()
+    private var engine = AVAudioEngine()
+    private var inputMixer = AVAudioMixerNode()
     private var eqNode = AVAudioUnitEQ(numberOfBands: 2)
+    private var outputMixer = AVAudioMixerNode()
 
     @Published var isRunning: Bool = false
-    @Published var isMicConnected: Bool = false
-    @Published var connectedMicName: String = "سماعة الرأس"
-
-    // Super Hearing Style Controls (1 to 200)
-    @Published var boostLevel: Float = 66.0
+    @Published var boostLevel: Float = 66.0 // 1 to 200
     @Published var isDistortionEnabled: Bool = false
-    @Published var distortionAmount: Float = 50.0
-    @Published var currentAudioLevel: Float = 0.5
+    @Published var distortionAmount: Float = 40.0
     @Published var errorMessage: String? = nil
 
     init() {
-        setupAudioSession()
-        checkAudioRoute()
-        registerNotifications()
+        setupSession()
     }
 
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
-
-    // MARK: - Route Notifications
-    private func registerNotifications() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleRouteChange),
-            name: AVAudioSession.routeChangeNotification,
-            object: nil
-        )
-    }
-
-    @objc private func handleRouteChange(notification: Notification) {
-        DispatchQueue.main.async {
-            self.checkAudioRoute()
-        }
-    }
-
-    // MARK: - Detect Headset / Earphones
-    func checkAudioRoute() {
-        let session = AVAudioSession.sharedInstance()
-        let currentRoute = session.currentRoute
-
-        var hasExternalRoute = false
-        var deviceName = "سماعة الرأس"
-
-        for output in currentRoute.outputs {
-            switch output.portType {
-            case .headphones:
-                hasExternalRoute = true
-                deviceName = "سماعة سلكية"
-            case .bluetoothA2DP, .bluetoothHFP, .bluetoothLE:
-                hasExternalRoute = true
-                deviceName = output.portName.isEmpty ? "سماعة بلوتوث / AirPods" : output.portName
-            case .usbAudio:
-                hasExternalRoute = true
-                deviceName = "سماعة/مايك USB"
-            default:
-                break
-            }
-        }
-
-        for input in currentRoute.inputs {
-            switch input.portType {
-            case .headsetMic:
-                hasExternalRoute = true
-                deviceName = "مايك سلكي"
-            case .bluetoothHFP:
-                hasExternalRoute = true
-                deviceName = input.portName.isEmpty ? "مايك بلوتوث" : input.portName
-            default:
-                break
-            }
-        }
-
-        self.isMicConnected = hasExternalRoute
-        self.connectedMicName = hasExternalRoute ? deviceName : "سماعة الرأس"
-    }
-
-    // MARK: - Audio Session Setup (Identical to Super Hearing)
-    func setupAudioSession() {
+    func setupSession() {
         let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(
-                .playAndRecord,
-                mode: .measurement,
-                options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker, .mixWithOthers]
-            )
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
-
-            if session.isInputGainSettable {
-                try session.setInputGain(1.0)
-            }
+            try session.setCategory(.playAndRecord, mode: .measurement, options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker, .mixWithOthers])
+            try session.setPreferredSampleRate(48000)
+            try session.setPreferredIOBufferDuration(1024.0 / 48000.0)
+            try session.setActive(true)
         } catch {
-            print("AudioSession Error: \(error.localizedDescription)")
+            print("Session error: \(error.localizedDescription)")
         }
     }
 
-    // MARK: - Ultra-Stable Crash-Proof Engine Setup
-    private func configureEngine() {
-        audioEngine.stop()
-        audioEngine.reset()
+    private func setupEngine() {
+        engine.stop()
+        engine.reset()
 
-        let inputNode = audioEngine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
+        let inputNode = engine.inputNode
+        let inputFormat = inputNode.inputFormat(forBus: 0)
 
-        // Ensure valid sample rate to avoid coreaudio exceptions
-        guard format.sampleRate > 0 else { return }
+        // Attach mixers and EQ
+        engine.attach(inputMixer)
+        engine.attach(eqNode)
+        engine.attach(outputMixer)
 
-        // Configure EQ for amplification
-        let boostBand = eqNode.bands[0]
-        boostBand.filterType = .parametric
-        boostBand.frequency = 1800.0
-        boostBand.bandwidth = 2.0
-        boostBand.bypass = false
+        // Safe connection chain: Input -> InputMixer -> EQ -> OutputMixer -> Output
+        engine.connect(inputNode, to: inputMixer, format: inputFormat)
+        engine.connect(inputMixer, to: eqNode, format: nil)
+        engine.connect(eqNode, to: outputMixer, format: nil)
+        engine.connect(outputMixer, to: engine.outputNode, format: nil)
 
-        let pierceBand = eqNode.bands[1]
-        pierceBand.filterType = .highShelf
-        pierceBand.frequency = 3500.0
-        pierceBand.bypass = false
+        // Setup EQ bands
+        let lowCut = eqNode.bands[0]
+        lowCut.filterType = .highPass
+        lowCut.frequency = 100.0
+        lowCut.bypass = false
+
+        let voicePresence = eqNode.bands[1]
+        voicePresence.filterType = .parametric
+        voicePresence.frequency = 2200.0
+        voicePresence.bandwidth = 1.5
+        voicePresence.bypass = false
 
         updateGains()
-
-        audioEngine.attach(eqNode)
-
-        // Clean direct connection matching Super Hearing
-        audioEngine.connect(inputNode, to: eqNode, format: format)
-        audioEngine.connect(eqNode, to: audioEngine.mainMixerNode, format: format)
-
-        // Make sure mainMixer volume is full
-        audioEngine.mainMixerNode.outputVolume = 1.0
+        engine.prepare()
     }
 
     func updateGains() {
-        // Boost level maps from 1 to 200
-        // Standard Super Hearing (66) maps to +14 dB
-        // Max (200) maps to +24 dB parametric + +18 dB high shelf
-        let normalized = boostLevel / 200.0
-        let midGain = normalized * 24.0
-        let highGain = normalized * 18.0
+        // Map boostLevel (1 to 200) to global EQ gain and mixer volumes
+        // Level 66 maps to ~14 dB
+        // Level 200 maps to ~36 dB extreme amplification
+        let gainDb = ((boostLevel / 200.0) * 36.0) - 6.0
+        eqNode.globalGain = gainDb
 
-        if eqNode.bands.count >= 2 {
-            eqNode.bands[0].gain = midGain
-            eqNode.bands[1].gain = highGain
-        }
-
-        // Slight distortion simulation via extreme gain driving
         if isDistortionEnabled {
-            let distGain = (distortionAmount / 100.0) * 8.0
-            if eqNode.bands.count >= 2 {
-                eqNode.bands[0].gain = midGain + distGain
-            }
+            let extraDist = (distortionAmount / 100.0) * 12.0
+            eqNode.bands[1].gain = extraDist
+        } else {
+            eqNode.bands[1].gain = 0.0
         }
+
+        inputMixer.outputVolume = 1.0
+        outputMixer.outputVolume = 1.0
     }
 
-    // MARK: - Start / Stop Actions
-    func toggleEngine() {
+    func toggle() {
         if isRunning {
             stop()
         } else {
@@ -168,26 +89,31 @@ class AudioEngineManager: ObservableObject {
         }
     }
 
-    func start() {
-        setupAudioSession()
-        configureEngine()
+    func toggleEngine() {
+        toggle()
+    }
 
-        do {
-            try audioEngine.start()
-            isRunning = true
-            errorMessage = nil
-            currentAudioLevel = 0.85
-        } catch {
-            print("Audio Engine Start Failed: \(error.localizedDescription)")
-            errorMessage = "تعذر تشغيل الصوت: \(error.localizedDescription)"
-            isRunning = false
+    func start() {
+        AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
+            guard let self = self, granted else { return }
+            DispatchQueue.main.async {
+                self.setupSession()
+                self.setupEngine()
+                do {
+                    try self.engine.start()
+                    self.isRunning = true
+                    self.errorMessage = nil
+                } catch {
+                    self.errorMessage = error.localizedDescription
+                    self.isRunning = false
+                }
+            }
         }
     }
 
     func stop() {
-        audioEngine.stop()
+        engine.stop()
         isRunning = false
-        currentAudioLevel = 0.0
     }
 
     func setBoost(_ val: Float) {
@@ -195,9 +121,9 @@ class AudioEngineManager: ObservableObject {
         updateGains()
     }
 
-    func setDistortion(enabled: Bool, amount: Float) {
+    func setDistortion(enabled: Bool, val: Float) {
         isDistortionEnabled = enabled
-        distortionAmount = amount
+        distortionAmount = val
         updateGains()
     }
 }
