@@ -8,13 +8,91 @@ class AudioEngineManager: ObservableObject {
     private var isConfigured = false
 
     @Published var isRunning: Bool = false
-    @Published var preampGain: Float = 5.0       // 1.0x to 30.0x multiplier
-    @Published var distortionLevel: Float = 0.35 // 0.0 to 1.0 (Soft saturation / warmth)
-    @Published var pierceBoost: Float = 12.0     // High-shelf gain in dB (0 to 24 dB)
+    @Published var isMicConnected: Bool = false
+    @Published var connectedMicName: String = "غير متصل"
+    @Published var preampGain: Float = 12.0      // 1.0x to 30.0x multiplier
+    @Published var distortionLevel: Float = 0.45 // 0.0 to 1.0 (Soft saturation / warmth)
+    @Published var pierceBoost: Float = 14.0     // High-shelf gain in dB (0 to 24 dB)
     @Published var currentAudioLevel: Float = 0.0 // For live VU meter
+    @Published var errorMessage: String? = nil
 
     init() {
         setupAudioSession()
+        checkAudioRoute()
+        registerNotifications()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    // MARK: - Route Changes Listener
+    private func registerNotifications() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleRouteChange),
+            name: AVAudioSession.routeChangeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func handleRouteChange(notification: Notification) {
+        DispatchQueue.main.async {
+            self.checkAudioRoute()
+            // If mic disconnected while running, stop engine to protect hearing and prevent feedback screech
+            if !self.isMicConnected && self.isRunning {
+                self.stop()
+                self.errorMessage = "تم إيقاف التضخيم تلقائياً: تم فصل المايك/السماعة!"
+            }
+        }
+    }
+
+    // MARK: - Detect Headset / External Mic
+    func checkAudioRoute() {
+        let session = AVAudioSession.sharedInstance()
+        let currentRoute = session.currentRoute
+
+        var hasExternalMicOrHeadset = false
+        var deviceName = "مايك الآيفون المدمج (غير مسموح)"
+
+        // Check Input Devices (Wired headset, Bluetooth HFP, USB mic)
+        for input in currentRoute.inputs {
+            switch input.portType {
+            case .headsetMic:
+                hasExternalMicOrHeadset = true
+                deviceName = "مايك سلكي (Headset Mic)"
+            case .bluetoothHFP, .bluetoothLE:
+                hasExternalMicOrHeadset = true
+                deviceName = input.portName.isEmpty ? "بلوتوث / AirPods" : input.portName
+            case .usbAudio:
+                hasExternalMicOrHeadset = true
+                deviceName = "مايك USB / خارجي"
+            default:
+                break
+            }
+        }
+
+        // Also check Outputs (if user plugged headphones/AirPods, input can route through it safely)
+        if !hasExternalMicOrHeadset {
+            for output in currentRoute.outputs {
+                switch output.portType {
+                case .headphones:
+                    hasExternalMicOrHeadset = true
+                    deviceName = "سماعة رأس سلكية"
+                case .bluetoothA2DP, .bluetoothHFP, .bluetoothLE:
+                    hasExternalMicOrHeadset = true
+                    deviceName = output.portName.isEmpty ? "بلوتوث / AirPods" : output.portName
+                case .usbAudio:
+                    hasExternalMicOrHeadset = true
+                    deviceName = "سماعة USB خارجية"
+                default:
+                    break
+                }
+            }
+        }
+
+        self.isMicConnected = hasExternalMicOrHeadset
+        self.connectedMicName = hasExternalMicOrHeadset ? deviceName : "لا يوجد مايك/سماعة متصلة"
     }
 
     // MARK: - Audio Session Configuration
@@ -25,8 +103,7 @@ class AudioEngineManager: ObservableObject {
                                     mode: .voiceChat,
                                     options: [.mixWithOthers, .allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker])
             try session.setActive(true, options: .notifyOthersOnDeactivation)
-            
-            // Set hardware input gain to 100% maximum if device hardware supports it
+
             if session.isInputGainSettable {
                 try session.setInputGain(1.0)
             }
@@ -48,14 +125,14 @@ class AudioEngineManager: ObservableObject {
             return
         }
 
-        // Configure High Shelf EQ for Pierce effect
+        // High Shelf EQ for Pierce effect
         let highShelf = eqNode.bands[0]
         highShelf.filterType = .highShelf
-        highShelf.frequency = 3500.0 // 3.5 kHz presence
+        highShelf.frequency = 3500.0
         highShelf.gain = pierceBoost
         highShelf.bypass = false
 
-        // Configure High Pass to remove sub-bass rumble
+        // High Pass filter to cut dead rumbling bass
         let highPass = eqNode.bands[1]
         highPass.filterType = .highPass
         highPass.frequency = 120.0
@@ -64,18 +141,17 @@ class AudioEngineManager: ObservableObject {
         audioEngine.attach(eqNode)
         audioEngine.connect(inputNode, to: eqNode, format: inputFormat)
 
-        // Install Audio Tap for Custom Digital Boost + Saturation (Overdrive)
+        // Install Audio Tap for Gain Multiplier + Soft-Clipping Saturation
         eqNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] (buffer, time) in
             guard let self = self else { return }
             self.processAudioBuffer(buffer: buffer)
         }
 
-        // Connect EQ to mainMixer
         audioEngine.connect(eqNode, to: audioEngine.mainMixerNode, format: inputFormat)
         isConfigured = true
     }
 
-    // MARK: - Custom DSP: Preamp Gain Multiplier + Soft-Clipping Saturation
+    // MARK: - Custom DSP
     private func processAudioBuffer(buffer: AVAudioPCMBuffer) {
         guard let channelData = buffer.floatChannelData else { return }
         let channelCount = Int(buffer.format.channelCount)
@@ -95,13 +171,11 @@ class AudioEngineManager: ObservableObject {
                 // Step 1: Preamp amplification
                 sample *= gain
 
-                // Step 2: Soft-Clipping Saturation (Warm analog distortion curve)
+                // Step 2: Soft-Clipping Saturation
                 if drive > 0.01 {
                     let driven = sample * (1.0 + drive * 4.0)
-                    // Hyperbolic tangent soft saturation curve: tanh(x)
                     sample = tanh(driven)
                 } else {
-                    // Fast safety limiter if distortion is off
                     sample = max(-1.0, min(1.0, sample))
                 }
 
@@ -129,11 +203,18 @@ class AudioEngineManager: ObservableObject {
     }
 
     func start() {
+        checkAudioRoute()
+        guard isMicConnected else {
+            errorMessage = "⚠️ لا يمكنك تشغيل المضخم بدون شبك مايك أو سماعة (سلكي أو بلوتوث / AirPods) لحماية سماعتك من التصفير!"
+            return
+        }
+
         setupAudioSession()
         configureEngine()
         do {
             try audioEngine.start()
             isRunning = true
+            errorMessage = nil
         } catch {
             print("Failed to start audio engine: \(error.localizedDescription)")
             isRunning = false
