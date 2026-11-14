@@ -6,14 +6,14 @@
       "name": "Super Hearing Pro",
       "bundleIdentifier": "com.ghazi.micboosterpro",
       "developerName": "Ghazi",
-      "version": "4.0.0",
-      "versionDate": "2026-11-14T20:10:00Z",
-      "versionDescription": "إصدار 4.0.0: دمج ملفات Assets.car الأصلية (حجم 36MB)، حل مشكلة الحواف السوداء فوق وتحت بشاشة Launch الأصلية، وضمان عمل زر START بثبات تام.",
+      "version": "4.1",
+      "versionDate": "2026-11-14T20:15:00Z",
+      "versionDescription": "Fix: microphone permission + full-screen launch screen (crash on START and black bars fixed).",
       "downloadURL": "https://github.com/2xf54/MicBoosterPro/releases/latest/download/MicBoosterPro.ipa",
       "localizedDescription": "تطبيق تضخيم مطابق لشاشات Super Hearing بالضبط مع حد 100 وبدون قيود.",
       "iconURL": "https://raw.githubusercontent.com/2xf54/MicBoosterPro/main/icon.png",
       "tintColor": "E5A912",
-      "size": 36000000
+      "size": 300000
     }
   ]
 }

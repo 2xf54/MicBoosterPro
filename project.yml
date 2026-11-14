@@ -14,12 +14,23 @@ targets:
       - path: Assets.xcassets
     info:
       path: Info.plist
+      properties:
+        CFBundleDisplayName: "Super Hearing Pro"
+        CFBundleShortVersionString: "4.1"
+        CFBundleVersion: "41"
+        LSRequiresIPhoneOS: true
+        NSMicrophoneUsageDescription: "The app needs the microphone to amplify sound to your headphones in real time."
+        UIBackgroundModes: [audio]
+        UILaunchScreen:
+          UIColorName: ""
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIRequiresFullScreen: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ghazi.micboosterpro
-        INFOPLIST_FILE: Info.plist
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGNING_ALLOWED: NO
         CODE_SIGNING_REQUIRED: NO

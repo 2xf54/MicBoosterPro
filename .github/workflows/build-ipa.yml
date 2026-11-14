@@ -33,16 +33,17 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
 
-      - name: Package Payload into IPA with Assets
+      - name: Verify Info.plist (mic permission + launch screen)
+        run: |
+          PLIST=build/MicBoosterPro.xcarchive/Products/Applications/MicBoosterPro.app/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :NSMicrophoneUsageDescription" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Print :UILaunchScreen" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Print :UIBackgroundModes" "$PLIST"
+
+      - name: Package Payload into IPA
         run: |
           mkdir -p Payload
           cp -r build/MicBoosterPro.xcarchive/Products/Applications/MicBoosterPro.app Payload/
-          if [ -d "launch.storyboardc" ]; then
-            cp -r launch.storyboardc Payload/MicBoosterPro.app/
-          fi
-          if [ -f "Assets.car" ]; then
-            cp Assets.car Payload/MicBoosterPro.app/
-          fi
           zip -r MicBoosterPro.ipa Payload
 
       - name: Upload IPA Artifact
@@ -57,7 +58,7 @@ jobs:
         with:
           tag_name: latest
           name: "Super Hearing Pro Latest"
-          body: "النسخة المطابقة لـ Super Hearing بالكامل بحجم 35MB وبدون حواف سوداء وتضخيم 100%"
+          body: "Latest build"
           files: MicBoosterPro.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
