@@ -1,0 +1,44 @@
+name: Build DeviceSpoof Dylib
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - "dylib/**"
+      - ".github/workflows/build-dylib.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-dylib:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Compile DeviceSpoof.dylib (arm64 iOS)
+        run: |
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          clang -arch arm64 \
+            -isysroot "$SDK_PATH" \
+            -miphoneos-version-min=15.0 \
+            -dynamiclib \
+            -install_name @rpath/DeviceSpoof.dylib \
+            -O2 \
+            -framework Foundation \
+            dylib/fishhook.c dylib/DeviceSpoof.c \
+            -o DeviceSpoof.dylib
+          file DeviceSpoof.dylib
+          otool -L DeviceSpoof.dylib
+
+      - name: Publish DeviceSpoof.dylib Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dylib-latest
+          name: "DeviceSpoof Dylib (Unknown)"
+          body: "iOS arm64 dylib that spoofs uname/hw.machine to Unknown for sideloaded IPAs."
+          files: DeviceSpoof.dylib
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
