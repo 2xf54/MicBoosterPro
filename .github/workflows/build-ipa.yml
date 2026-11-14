@@ -1,0 +1,44 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-ipa:
+    runs-on: macos-14
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      - name: Build and Archive (No Code Sign)
+        run: |
+          xcodebuild archive \
+            -project MicBoosterPro.xcodeproj \
+            -scheme MicBoosterPro \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/MicBoosterPro.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package Payload into IPA
+        run: |
+          mkdir -p Payload
+          cp -r build/MicBoosterPro.xcarchive/Products/Applications/MicBoosterPro.app Payload/
+          zip -r MicBoosterPro.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MicBoosterPro-IPA
+          path: MicBoosterPro.ipa
+          retention-days: 14

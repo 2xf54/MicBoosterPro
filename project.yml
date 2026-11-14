@@ -1,0 +1,24 @@
+name: MicBoosterPro
+options:
+  bundleIdPrefix: com.ghazi
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  MicBoosterPro:
+    type: application
+    platform: iOS
+    sources:
+      - path: .
+        includes:
+          - "*.swift"
+    info:
+      path: Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ghazi.micboosterpro
+        INFOPLIST_FILE: Info.plist
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_IDENTITY: ""
