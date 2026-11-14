@@ -5,14 +5,10 @@ class AudioEngineManager: ObservableObject {
     private let engine = AVAudioEngine()
     private let intermediateMixer = AVAudioMixerNode()
     private let eqNode = AVAudioUnitEQ(numberOfBands: 2)
-    private let distortionNode = AVAudioUnitDistortion()
-    private let noiseMixer = AVAudioMixerNode()
-    private var noiseSourceNode: AVAudioSourceNode?
     private var isEnginePrepared = false
 
     @Published var isRunning: Bool = false
     @Published var volumePercent: Int = 73 // 0 to 100 (100 = max boost)
-    @Published var noisePercent: Int = 0   // 0 to 100 (distortion + static noise)
     @Published var isMonitoringMuted: Bool = false // MIC button: false = Red (hear self), true = Green (muted locally)
     @Published var errorMessage: String? = nil
 
@@ -41,36 +37,15 @@ class AudioEngineManager: ObservableObject {
 
         guard inFormat.sampleRate > 0 else { return }
 
-        // Attach processing nodes once
+        // Attach nodes once
         engine.attach(intermediateMixer)
         engine.attach(eqNode)
-        engine.attach(distortionNode)
-        engine.attach(noiseMixer)
 
-        // Connect inputNode -> intermediateMixer -> eqNode -> distortionNode -> mainMixerNode
+        // Connect inputNode -> intermediateMixer -> eqNode -> mainMixerNode
         engine.connect(inputNode, to: intermediateMixer, format: inFormat)
         let mixFormat = intermediateMixer.outputFormat(forBus: 0)
         engine.connect(intermediateMixer, to: eqNode, format: mixFormat)
-        engine.connect(eqNode, to: distortionNode, format: mixFormat)
-        engine.connect(distortionNode, to: engine.mainMixerNode, format: mixFormat)
-
-        // Static noise generator node for audible distortion/interference
-        let sourceNode = AVAudioSourceNode(format: mixFormat) { _, _, frameCount, audioBufferList -> OSStatus in
-            let ablPointer = UnsafeMutableAudioBufferListPointer(audioBufferList)
-            for frame in 0..<Int(frameCount) {
-                let sample = Float.random(in: -0.35...0.35)
-                for buffer in ablPointer {
-                    if let data = buffer.mData?.assumingMemoryBound(to: Float.self) {
-                        data[frame] = sample
-                    }
-                }
-            }
-            return noErr
-        }
-        self.noiseSourceNode = sourceNode
-        engine.attach(sourceNode)
-        engine.connect(sourceNode, to: noiseMixer, format: mixFormat)
-        engine.connect(noiseMixer, to: engine.mainMixerNode, format: mixFormat)
+        engine.connect(eqNode, to: engine.mainMixerNode, format: mixFormat)
 
         // EQ filter settings
         let hp = eqNode.bands[0]
@@ -85,16 +60,13 @@ class AudioEngineManager: ObservableObject {
         mid.gain = 0.0
         mid.bypass = false
 
-        // Distortion preset for voice/radio/speaker noise
-        distortionNode.loadFactoryPreset(.multiBrokenSpeaker)
-
         updateGains()
         engine.prepare()
         isEnginePrepared = true
     }
 
     func updateGains() {
-        // 1. Volume Boost (100% = maximum possible amplification)
+        // Volume Boost (100% = maximum possible amplification)
         if volumePercent <= 0 {
             intermediateMixer.outputVolume = 0.0
             eqNode.globalGain = 0.0
@@ -106,20 +78,7 @@ class AudioEngineManager: ObservableObject {
             eqNode.bands[1].gain = normalized * 18.0 // Up to +18 dB presence boost
         }
 
-        // 2. Noise / Distortion ("تشويش")
-        if noisePercent <= 0 {
-            distortionNode.bypass = true
-            distortionNode.wetDryMix = 0.0
-            noiseMixer.outputVolume = 0.0
-        } else {
-            let n = Float(noisePercent) / 100.0
-            distortionNode.bypass = false
-            distortionNode.wetDryMix = n * 100.0
-            distortionNode.preGain = (n * 24.0) - 6.0
-            noiseMixer.outputVolume = n * 0.65
-        }
-
-        // 3. Local Monitoring Mute (MIC button: Red = hear self + noise, Green = muted locally)
+        // Local Monitoring Mute (MIC button: Red = hear self, Green = muted locally)
         engine.mainMixerNode.outputVolume = isMonitoringMuted ? 0.0 : 1.0
     }
 
@@ -160,11 +119,6 @@ class AudioEngineManager: ObservableObject {
 
     func setVolume(_ val: Int) {
         volumePercent = max(0, min(100, val))
-        updateGains()
-    }
-
-    func setNoise(_ val: Int) {
-        noisePercent = max(0, min(100, val))
         updateGains()
     }
 }
