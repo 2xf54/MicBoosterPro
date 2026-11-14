@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "Ghazi Apps",
   "identifier": "com.ghazi.sources",
   "apps": [
@@ -9,8 +9,8 @@
       "version": "4.1",
       "versionDate": "2026-11-14T20:15:00Z",
       "versionDescription": "Fix: microphone permission + full-screen launch screen (crash on START and black bars fixed).",
-      "downloadURL": "https://github.com/2xf54/MicBoosterPro/releases/latest/download/MicBoosterPro.ipa",
-      "localizedDescription": "تطبيق تضخيم مطابق لشاشات Super Hearing بالضبط مع حد 100 وبدون قيود.",
+      "downloadURL": "https://github.com/2xf54/MicBoosterPro/releases/download/latest/MicBoosterPro.ipa",
+      "localizedDescription": "ØªØ·Ø¨ÙŠÙ‚ ØªØ¶Ø®ÙŠÙ… Ù…Ø·Ø§Ø¨Ù‚ Ù„Ø´Ø§Ø´Ø§Øª Super Hearing Ø¨Ø§Ù„Ø¶Ø¨Ø· Ù…Ø¹ Ø­Ø¯ 100 ÙˆØ¨Ø¯ÙˆÙ† Ù‚ÙŠÙˆØ¯.",
       "iconURL": "https://raw.githubusercontent.com/2xf54/MicBoosterPro/main/icon.png",
       "tintColor": "E5A912",
       "size": 300000
