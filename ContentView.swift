@@ -2,82 +2,68 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var audio = AudioEngineManager()
-    @State private var slideOffset: CGFloat = 0
-
-    let modes = [
-        ("boost", "speaker.wave.2.fill"),
-        ("gain", "arrow.up.and.down.and.sparkles"),
-        ("noise", "ear.and.waveform"),
-        ("tune", "person.crop.circle"),
-        ("ballance", "arrow.left.arrow.right"),
-        ("presets", "square.grid.2x2")
-    ]
 
     var body: some View {
         ZStack {
             // Dark Teal / Navy background matching Super Hearing exactly
             LinearGradient(
-                colors: [Color(hex: "0d1824"), Color(hex: "08101a"), Color(hex: "04080e")],
+                colors: [Color(hex: "0b1520"), Color(hex: "070d14"), Color(hex: "03060a")],
                 startPoint: .top,
                 endPoint: .bottom
             )
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Top Mic Icon in Glowing Circle
-                Button(action: {
-                    withAnimation { audio.toggle() }
-                }) {
-                    ZStack {
-                        Circle()
-                            .fill(Color(hex: "E5A912"))
-                            .frame(width: 62, height: 62)
-                            .shadow(color: Color(hex: "E5A912").opacity(audio.isRunning ? 0.6 : 0.2), radius: 12)
+                // Top half-circle mic badge matching Super Hearing
+                ZStack {
+                    Circle()
+                        .fill(Color(hex: "E5A912"))
+                        .frame(width: 54, height: 54)
+                        .shadow(color: Color(hex: "E5A912").opacity(audio.isRunning ? 0.8 : 0.25), radius: 10)
 
-                        Image(systemName: "waveform.and.mic")
-                            .font(.system(size: 26, weight: .bold))
-                            .foregroundColor(.white)
-                    }
+                    Image(systemName: "waveform.and.mic")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(.white)
                 }
-                .padding(.top, 10)
-                .padding(.bottom, 12)
+                .padding(.top, 4)
+                .padding(.bottom, 6)
 
                 // Subheader: EQ and MIC buttons
                 HStack {
                     // EQ Button
-                    VStack(spacing: 4) {
+                    VStack(spacing: 3) {
                         ZStack {
                             Circle()
                                 .stroke(Color(hex: "E5A912").opacity(0.4), lineWidth: 1.5)
-                                .frame(width: 58, height: 58)
+                                .frame(width: 50, height: 50)
                             Image(systemName: "slider.horizontal.3")
-                                .font(.system(size: 20))
+                                .font(.system(size: 18))
                                 .foregroundColor(Color(hex: "E5A912"))
                         }
                         Text("EQ")
-                            .font(.system(size: 11, weight: .bold))
+                            .font(.system(size: 10, weight: .bold))
                             .foregroundColor(Color(hex: "E5A912"))
                     }
 
                     Spacer()
 
                     // MIC Button
-                    VStack(spacing: 4) {
+                    VStack(spacing: 3) {
                         ZStack {
                             Circle()
                                 .stroke(Color(hex: "E5A912").opacity(0.4), lineWidth: 1.5)
-                                .frame(width: 58, height: 58)
+                                .frame(width: 50, height: 50)
                             Image(systemName: "headphones")
-                                .font(.system(size: 20))
+                                .font(.system(size: 18))
                                 .foregroundColor(Color(hex: "E5A912"))
                         }
                         Text("MIC")
-                            .font(.system(size: 11, weight: .bold))
+                            .font(.system(size: 10, weight: .bold))
                             .foregroundColor(Color(hex: "E5A912"))
                     }
                 }
                 .padding(.horizontal, 40)
-                .padding(.bottom, 14)
+                .padding(.bottom, 6)
 
                 // Main Percentage & Title
                 VStack(spacing: 2) {
@@ -86,50 +72,49 @@ struct ContentView: View {
                         .foregroundColor(Color(hex: "E5A912"))
 
                     Text("VOLUME BOOST")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(Color(hex: "E5A912").opacity(0.8))
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color(hex: "E5A912").opacity(0.85))
                         .tracking(1)
                 }
-                .padding(.bottom, 14)
+                .padding(.bottom, 8)
 
-                // Super Hearing Center Rotary Dial Wheel
+                // Super Hearing Center Rotary Dial Wheel (With Bottom Arc)
                 ZStack {
-                    // Outer Ring with Ticks
+                    // Outer Ring with Ticks around bottom
                     Circle()
-                        .stroke(Color(hex: "E5A912").opacity(0.2), lineWidth: 2)
-                        .frame(width: 270, height: 270)
+                        .stroke(Color(hex: "E5A912").opacity(0.18), lineWidth: 2)
+                        .frame(width: 236, height: 236)
 
-                    // Arc Progress Ring
+                    // Bottom Arc Progress Ring (sweeping along the bottom from left to right like original)
                     Circle()
-                        .trim(from: 0.25, to: 0.25 + (CGFloat(audio.volumePercent) / 100.0) * 0.5)
+                        .trim(from: 0.12, to: 0.12 + (CGFloat(audio.volumePercent) / 100.0) * 0.26)
                         .stroke(
                             Color(hex: "E5A912"),
                             style: StrokeStyle(lineWidth: 6, lineCap: .round)
                         )
-                        .rotationEffect(.degrees(90))
-                        .frame(width: 270, height: 270)
+                        .frame(width: 236, height: 236)
 
                     // Inner Dial Wheel Face
                     Circle()
                         .fill(
                             RadialGradient(
-                                colors: [Color(hex: "172638"), Color(hex: "0c1520")],
+                                colors: [Color(hex: "152334"), Color(hex: "0a121a")],
                                 center: .center,
                                 startRadius: 10,
-                                endRadius: 130
+                                endRadius: 110
                             )
                         )
-                        .frame(width: 240, height: 240)
-                        .shadow(color: .black.opacity(0.5), radius: 10)
+                        .frame(width: 212, height: 212)
+                        .shadow(color: .black.opacity(0.6), radius: 8)
 
-                    // Active Slice Highlight Cone
+                    // Top Cone Highlight for 'boost' slice
                     Path { path in
-                        path.move(to: CGPoint(x: 120, y: 120))
+                        path.move(to: CGPoint(x: 106, y: 106))
                         path.addArc(
-                            center: CGPoint(x: 120, y: 120),
-                            radius: 115,
-                            startAngle: .degrees(-120),
-                            endAngle: .degrees(-60),
+                            center: CGPoint(x: 106, y: 106),
+                            radius: 104,
+                            startAngle: .degrees(-125),
+                            endAngle: .degrees(-55),
                             clockwise: false
                         )
                         path.closeSubpath()
@@ -141,104 +126,112 @@ struct ContentView: View {
                             endPoint: .bottom
                         )
                     )
-                    .frame(width: 240, height: 240)
+                    .frame(width: 212, height: 212)
 
                     // Center Knob
                     Circle()
-                        .fill(Color(hex: "091019"))
-                        .frame(width: 100, height: 100)
-                        .overlay(Circle().stroke(Color(hex: "E5A912").opacity(0.3), lineWidth: 1))
+                        .fill(Color(hex: "080e15"))
+                        .frame(width: 86, height: 86)
+                        .overlay(Circle().stroke(Color(hex: "E5A912").opacity(0.25), lineWidth: 1))
                         .overlay(
                             Text("VOLUME BOOST")
-                                .font(.system(size: 9, weight: .black, design: .monospaced))
+                                .font(.system(size: 8, weight: .black, design: .monospaced))
                                 .foregroundColor(Color(hex: "E5A912"))
                                 .multilineTextAlignment(.center)
-                                .padding(6)
+                                .padding(4)
                         )
 
-                    // Wheel Icons (boost, gain, noise, tune, ballance, presets)
+                    // 6 Icons around the wheel (boost, gain, noise, tune, ballance, presets)
                     VStack {
                         // Top item: boost
                         VStack(spacing: 2) {
                             Image(systemName: "speaker.wave.3.fill")
-                                .font(.system(size: 16, weight: .bold))
+                                .font(.system(size: 15, weight: .bold))
                             Text("boost")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(.system(size: 8, weight: .bold))
                         }
                         .foregroundColor(Color(hex: "E5A912"))
-                        .padding(.top, 22)
+                        .padding(.top, 14)
 
                         Spacer()
 
                         // Bottom item: tune
                         VStack(spacing: 2) {
                             Image(systemName: "person.crop.circle")
-                                .font(.system(size: 15))
+                                .font(.system(size: 13))
                             Text("tune")
-                                .font(.system(size: 9))
-                        }
-                        .foregroundColor(Color(hex: "E5A912").opacity(0.7))
-                        .padding(.bottom, 22)
-                    }
-                    .frame(width: 240, height: 240)
-
-                    HStack {
-                        // Left item: presets
-                        VStack(spacing: 2) {
-                            Image(systemName: "square.grid.2x2")
-                                .font(.system(size: 14))
-                            Text("presets")
                                 .font(.system(size: 8))
                         }
-                        .foregroundColor(Color(hex: "E5A912").opacity(0.7))
-                        .padding(.leading, 24)
+                        .foregroundColor(Color(hex: "E5A912").opacity(0.75))
+                        .padding(.bottom, 14)
+                    }
+                    .frame(width: 212, height: 212)
+
+                    HStack {
+                        // Left items: presets (top-left) & ballance (bottom-left)
+                        VStack(spacing: 36) {
+                            VStack(spacing: 2) {
+                                Image(systemName: "square.grid.2x2")
+                                    .font(.system(size: 13))
+                                Text("presets")
+                                    .font(.system(size: 8))
+                            }
+                            VStack(spacing: 2) {
+                                Image(systemName: "arrow.left.arrow.right")
+                                    .font(.system(size: 13))
+                                Text("ballance")
+                                    .font(.system(size: 8))
+                            }
+                        }
+                        .foregroundColor(Color(hex: "E5A912").opacity(0.75))
+                        .padding(.leading, 18)
 
                         Spacer()
 
-                        // Right item: gain
-                        VStack(spacing: 2) {
-                            Image(systemName: "arrow.up.and.down")
-                                .font(.system(size: 14))
-                            Text("gain")
-                                .font(.system(size: 8))
+                        // Right items: gain (top-right) & noise (bottom-right)
+                        VStack(spacing: 36) {
+                            VStack(spacing: 2) {
+                                Image(systemName: "arrow.up.and.down")
+                                    .font(.system(size: 13))
+                                Text("gain")
+                                    .font(.system(size: 8))
+                            }
+                            VStack(spacing: 2) {
+                                Image(systemName: "ear.and.waveform")
+                                    .font(.system(size: 13))
+                                Text("noise")
+                                    .font(.system(size: 8))
+                            }
                         }
-                        .foregroundColor(Color(hex: "E5A912").opacity(0.7))
-                        .padding(.trailing, 24)
+                        .foregroundColor(Color(hex: "E5A912").opacity(0.75))
+                        .padding(.trailing, 18)
                     }
-                    .frame(width: 240, height: 240)
+                    .frame(width: 212, height: 212)
 
-                    // 0 on Left, 1 on Right indicators
+                    // 0 on Left, 1 on Right indicators at bottom arc
                     HStack {
                         Text("0")
-                            .font(.system(size: 11, weight: .bold))
+                            .font(.system(size: 10, weight: .bold))
                             .foregroundColor(Color(hex: "E5A912"))
-                            .frame(width: 22, height: 22)
+                            .frame(width: 20, height: 20)
                             .background(Circle().stroke(Color(hex: "E5A912"), lineWidth: 1))
-                            .offset(x: -8)
+                            .offset(y: 45)
 
                         Spacer()
 
                         Text("1")
-                            .font(.system(size: 11, weight: .bold))
+                            .font(.system(size: 10, weight: .bold))
                             .foregroundColor(Color(hex: "E5A912"))
-                            .frame(width: 22, height: 22)
+                            .frame(width: 20, height: 20)
                             .background(Circle().stroke(Color(hex: "E5A912"), lineWidth: 1))
-                            .offset(x: 8)
+                            .offset(y: 45)
                     }
-                    .frame(width: 285)
+                    .frame(width: 250)
                 }
-                .gesture(
-                    DragGesture()
-                        .onChanged { value in
-                            let delta = Float(-value.translation.height / 3.0)
-                            let newVol = min(100, max(0, audio.volumePercent + Int(delta)))
-                            audio.setVolume(newVol)
-                        }
-                )
-                .padding(.bottom, 20)
+                .padding(.bottom, 12)
 
-                // Slider Control to easily slide from 0 to 100
-                HStack(spacing: 12) {
+                // Slider Control
+                HStack(spacing: 10) {
                     Text("0%")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.gray)
@@ -257,44 +250,41 @@ struct ContentView: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(Color(hex: "E5A912"))
                 }
-                .padding(.horizontal, 36)
-                .padding(.bottom, 22)
+                .padding(.horizontal, 32)
+                .padding(.bottom, 14)
 
                 Spacer()
 
-                // Super Hearing Slide / Tap START Button
+                // Super Hearing Slide START Button (Guaranteed visible at bottom)
                 Button(action: {
-                    withAnimation(.spring()) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) {
                         audio.toggle()
                     }
                 }) {
                     ZStack(alignment: .leading) {
-                        // Container Capsule
                         Capsule()
-                            .fill(Color(hex: "09121a"))
+                            .fill(Color(hex: "081119"))
                             .overlay(Capsule().stroke(Color(hex: "E5A912").opacity(0.3), lineWidth: 1))
-                            .frame(height: 58)
+                            .frame(height: 54)
 
-                        // Slide Text on the right
                         HStack {
                             Spacer()
-                            Text(audio.isRunning ? "Tap to STOP session" : "Slide for start session")
+                            Text(audio.isRunning ? "Slide to STOP" : "Slide for start session")
                                 .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color(hex: "E5A912").opacity(0.7))
+                                .foregroundColor(Color(hex: "E5A912").opacity(0.8))
                             Spacer()
                         }
-                        .padding(.leading, 80)
+                        .padding(.leading, 70)
 
-                        // Red/Green Pill Knob
                         HStack(spacing: 4) {
                             Text(audio.isRunning ? "STOP" : "START")
                                 .font(.system(size: 13, weight: .black))
                                 .foregroundColor(.white)
                             Image(systemName: "chevron.right.2")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundColor(.white.opacity(0.8))
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.white.opacity(0.85))
                         }
-                        .frame(width: 125, height: 50)
+                        .frame(width: 115, height: 46)
                         .background(
                             LinearGradient(
                                 colors: audio.isRunning ? [Color(hex: "10b981"), Color(hex: "059669")] : [Color(hex: "ff4757"), Color(hex: "e84118")],
@@ -305,12 +295,12 @@ struct ContentView: View {
                         .clipShape(Capsule())
                         .shadow(color: (audio.isRunning ? Color.green : Color.red).opacity(0.4), radius: 6)
                         .padding(.leading, 4)
-                        .offset(x: audio.isRunning ? 180 : 0)
+                        .offset(x: audio.isRunning ? 175 : 0)
                         .animation(.spring(), value: audio.isRunning)
                     }
                 }
-                .padding(.horizontal, 28)
-                .padding(.bottom, 24)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 14)
             }
         }
     }
