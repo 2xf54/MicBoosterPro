@@ -2,13 +2,13 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var audioManager = AudioEngineManager()
-    @State private var selectedPreset = "Super Hearing (66)"
+    @State private var selectedPreset = "Default (66)"
 
     let presets: [(String, Float, Bool, Float)] = [
-        ("Super Hearing (66)", 66.0, false, 0.0),
-        ("High (80)", 80.0, false, 0.0),
+        ("Default (66)", 66.0, false, 0.0),
+        ("Boost (85)", 85.0, false, 0.0),
         ("Max (100)", 100.0, false, 0.0),
-        ("Max + Distortion (100)", 100.0, true, 60.0)
+        ("Max + Distortion (100)", 100.0, true, 50.0)
     ]
 
     var body: some View {
@@ -27,7 +27,7 @@ struct ContentView: View {
                         .foregroundColor(Color(hex: "FFCC00"))
                         .font(.system(size: 20, weight: .bold))
 
-                    Text("SUPER BOOSTER PRO")
+                    Text("SUPER HEARING PRO")
                         .font(.system(size: 18, weight: .black, design: .monospaced))
                         .foregroundColor(.white)
 
@@ -80,7 +80,7 @@ struct ContentView: View {
                             .font(.system(size: 9, weight: .bold, design: .monospaced))
                             .foregroundColor(.gray)
                         Spacer()
-                        Text(audioManager.isRunning ? "ACTIVE" : "STANDBY")
+                        Text(audioManager.isRunning ? "ACTIVE • LIVE" : "STANDBY")
                             .font(.system(size: 10, weight: .bold, design: .monospaced))
                             .foregroundColor(audioManager.isRunning ? Color(hex: "FFCC00") : .gray)
                     }
@@ -234,7 +234,7 @@ struct ContentView: View {
                     Image(systemName: "headphones")
                         .foregroundColor(Color(hex: "FFCC00"))
                         .font(.system(size: 10))
-                    Text("Super Hearing Engine Active • Live Ear Monitoring")
+                    Text("Live Ear Monitoring • Identical to Super Hearing")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundColor(.gray)
                 }

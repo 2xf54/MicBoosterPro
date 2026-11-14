@@ -3,14 +3,14 @@
   "identifier": "com.ghazi.sources",
   "apps": [
     {
-      "name": "MicBoosterPro",
+      "name": "Super Hearing Pro",
       "bundleIdentifier": "com.ghazi.micboosterpro",
       "developerName": "Ghazi",
-      "version": "2.3.0",
-      "versionDate": "2026-11-14T19:39:00Z",
-      "versionDescription": "إصدار 2.3.0: محاكاة كاملة لـ Super Hearing مع حد التضخيم 100 وزر وسلايدر التشويش وتشغيل فوري مستقر بدون أي كراش.",
+      "version": "3.0.0",
+      "versionDate": "2026-11-14T19:55:00Z",
+      "versionDescription": "إصدار 3.0.0 النهائي: مطابقة كاملة لـ Super Hearing مع حل الكراش نهائياً، حد التضخيم 100 كامل، وزر التشويش السلس وسماع فوري مستقر 100%.",
       "downloadURL": "https://github.com/2xf54/MicBoosterPro/releases/latest/download/MicBoosterPro.ipa",
-      "localizedDescription": "تطبيق تضخيم المايكروفون والعمل في الخلفية مع مكالمات التيليجرام وغيرها.",
+      "localizedDescription": "تطبيق تضخيم المايكروفون مطابق لـ Super Hearing مع حد 100 وبدون قيود.",
       "iconURL": "https://raw.githubusercontent.com/2xf54/MicBoosterPro/main/icon.png",
       "tintColor": "FFCC00",
       "size": 42000

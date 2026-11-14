@@ -3,9 +3,8 @@ import AVFoundation
 
 class AudioEngineManager: ObservableObject {
     private var engine = AVAudioEngine()
-    private var inputMixer = AVAudioMixerNode()
+    private var intermediateMixer = AVAudioMixerNode()
     private var eqNode = AVAudioUnitEQ(numberOfBands: 2)
-    private var outputMixer = AVAudioMixerNode()
 
     @Published var isRunning: Bool = false
     @Published var boostLevel: Float = 66.0 // 1 to 100
@@ -14,16 +13,14 @@ class AudioEngineManager: ObservableObject {
     @Published var errorMessage: String? = nil
 
     init() {
-        setupSession()
+        setupAudioSession()
     }
 
-    func setupSession() {
+    func setupAudioSession() {
         let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(.playAndRecord, mode: .measurement, options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker, .mixWithOthers])
-            try session.setPreferredSampleRate(48000)
-            try session.setPreferredIOBufferDuration(1024.0 / 48000.0)
-            try session.setActive(true)
+            try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker, .mixWithOthers])
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
             print("Session error: \(error.localizedDescription)")
         }
@@ -34,50 +31,56 @@ class AudioEngineManager: ObservableObject {
         engine.reset()
 
         let inputNode = engine.inputNode
-        let inputFormat = inputNode.inputFormat(forBus: 0)
+        let inFormat = inputNode.inputFormat(forBus: 0)
 
-        engine.attach(inputMixer)
+        // Attach nodes
+        engine.attach(intermediateMixer)
         engine.attach(eqNode)
-        engine.attach(outputMixer)
 
-        // Dual-mixer chain matching Super Hearing
-        engine.connect(inputNode, to: inputMixer, format: inputFormat)
-        engine.connect(inputMixer, to: eqNode, format: nil)
-        engine.connect(eqNode, to: outputMixer, format: nil)
-        engine.connect(outputMixer, to: engine.outputNode, format: nil)
+        // 1. Connect inputNode to intermediateMixer (Mixer automatically handles any mono/sample rate)
+        engine.connect(inputNode, to: intermediateMixer, format: inFormat)
 
-        let lowCut = eqNode.bands[0]
-        lowCut.filterType = .highPass
-        lowCut.frequency = 100.0
-        lowCut.bypass = false
+        // 2. Connect intermediateMixer to EQ using clean standard mixer output format
+        let mixFormat = intermediateMixer.outputFormat(forBus: 0)
+        engine.connect(intermediateMixer, to: eqNode, format: mixFormat)
 
-        let voicePresence = eqNode.bands[1]
-        voicePresence.filterType = .parametric
-        voicePresence.frequency = 2200.0
-        voicePresence.bandwidth = 1.5
-        voicePresence.bypass = false
+        // 3. Connect EQ to mainMixerNode (mainMixerNode connects automatically to outputNode)
+        engine.connect(eqNode, to: engine.mainMixerNode, format: mixFormat)
+
+        // Setup EQ filters
+        let hp = eqNode.bands[0]
+        hp.filterType = .highPass
+        hp.frequency = 120.0
+        hp.bypass = false
+
+        let mid = eqNode.bands[1]
+        mid.filterType = .parametric
+        mid.frequency = 2000.0
+        mid.bandwidth = 1.8
+        mid.bypass = false
 
         updateGains()
         engine.prepare()
     }
 
     func updateGains() {
-        // Boost level 1 to 100 (where 66 is baseline Super Hearing, 100 is max)
-        let gainDb = ((boostLevel / 100.0) * 30.0) - 4.0
+        // Boost level 1 to 100: Level 66 = +18dB, Level 100 = +32dB
+        let normalized = boostLevel / 100.0
+        let gainDb = (normalized * 32.0) - 2.0
         eqNode.globalGain = gainDb
 
         if isDistortionEnabled {
-            let extraDist = (distortionAmount / 100.0) * 12.0
-            eqNode.bands[1].gain = extraDist
+            let distGain = (distortionAmount / 100.0) * 12.0
+            eqNode.bands[1].gain = distGain
         } else {
             eqNode.bands[1].gain = 0.0
         }
 
-        inputMixer.outputVolume = 1.0
-        outputMixer.outputVolume = 1.0
+        intermediateMixer.outputVolume = 1.0
+        engine.mainMixerNode.outputVolume = 1.0
     }
 
-    func toggle() {
+    func toggleEngine() {
         if isRunning {
             stop()
         } else {
@@ -85,15 +88,11 @@ class AudioEngineManager: ObservableObject {
         }
     }
 
-    func toggleEngine() {
-        toggle()
-    }
-
     func start() {
         AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
             guard let self = self, granted else { return }
             DispatchQueue.main.async {
-                self.setupSession()
+                self.setupAudioSession()
                 self.setupEngine()
                 do {
                     try self.engine.start()
