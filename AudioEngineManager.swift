@@ -8,7 +8,7 @@ class AudioEngineManager: ObservableObject {
     private var outputMixer = AVAudioMixerNode()
 
     @Published var isRunning: Bool = false
-    @Published var boostLevel: Float = 66.0 // 1 to 200
+    @Published var boostLevel: Float = 66.0 // 1 to 100
     @Published var isDistortionEnabled: Bool = false
     @Published var distortionAmount: Float = 40.0
     @Published var errorMessage: String? = nil
@@ -36,18 +36,16 @@ class AudioEngineManager: ObservableObject {
         let inputNode = engine.inputNode
         let inputFormat = inputNode.inputFormat(forBus: 0)
 
-        // Attach mixers and EQ
         engine.attach(inputMixer)
         engine.attach(eqNode)
         engine.attach(outputMixer)
 
-        // Safe connection chain: Input -> InputMixer -> EQ -> OutputMixer -> Output
+        // Dual-mixer chain matching Super Hearing
         engine.connect(inputNode, to: inputMixer, format: inputFormat)
         engine.connect(inputMixer, to: eqNode, format: nil)
         engine.connect(eqNode, to: outputMixer, format: nil)
         engine.connect(outputMixer, to: engine.outputNode, format: nil)
 
-        // Setup EQ bands
         let lowCut = eqNode.bands[0]
         lowCut.filterType = .highPass
         lowCut.frequency = 100.0
@@ -64,10 +62,8 @@ class AudioEngineManager: ObservableObject {
     }
 
     func updateGains() {
-        // Map boostLevel (1 to 200) to global EQ gain and mixer volumes
-        // Level 66 maps to ~14 dB
-        // Level 200 maps to ~36 dB extreme amplification
-        let gainDb = ((boostLevel / 200.0) * 36.0) - 6.0
+        // Boost level 1 to 100 (where 66 is baseline Super Hearing, 100 is max)
+        let gainDb = ((boostLevel / 100.0) * 30.0) - 4.0
         eqNode.globalGain = gainDb
 
         if isDistortionEnabled {
@@ -121,9 +117,9 @@ class AudioEngineManager: ObservableObject {
         updateGains()
     }
 
-    func setDistortion(enabled: Bool, val: Float) {
+    func setDistortion(enabled: Bool, amount: Float) {
         isDistortionEnabled = enabled
-        distortionAmount = val
+        distortionAmount = amount
         updateGains()
     }
 }

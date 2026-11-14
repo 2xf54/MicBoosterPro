@@ -6,14 +6,13 @@ struct ContentView: View {
 
     let presets: [(String, Float, Bool, Float)] = [
         ("Super Hearing (66)", 66.0, false, 0.0),
-        ("Pro Boost (100)", 100.0, true, 40.0),
-        ("Overdrive (150)", 150.0, true, 75.0),
-        ("MAX BEAST (200)", 200.0, true, 100.0)
+        ("High (80)", 80.0, false, 0.0),
+        ("Max (100)", 100.0, false, 0.0),
+        ("Max + Distortion (100)", 100.0, true, 60.0)
     ]
 
     var body: some View {
         ZStack {
-            // Dark audio studio background
             LinearGradient(
                 colors: [Color(hex: "080c14"), Color(hex: "0f172a"), Color.black],
                 startPoint: .top,
@@ -22,7 +21,7 @@ struct ContentView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // MARK: - Header
+                // Header
                 HStack(spacing: 8) {
                     Image(systemName: "mic.fill.badge.plus")
                         .foregroundColor(Color(hex: "FFCC00"))
@@ -34,58 +33,54 @@ struct ContentView: View {
 
                     Spacer()
 
-                    // Pulse indicator
                     Circle()
                         .fill(audioManager.isRunning ? Color(hex: "FFCC00") : Color.gray)
                         .frame(width: 8, height: 8)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
-                .padding(.bottom, 12)
+                .padding(.bottom, 14)
 
-                // MARK: - Super Hearing Yellow Glowing Mic Button
+                // Super Hearing Yellow Glowing Mic Button
                 Button(action: {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) {
                         audioManager.toggleEngine()
                     }
                 }) {
                     ZStack {
-                        // Outer pulse ring
                         Circle()
                             .fill(audioManager.isRunning ? Color(hex: "FFCC00").opacity(0.25) : Color.white.opacity(0.04))
-                            .frame(width: 125, height: 125)
+                            .frame(width: 130, height: 130)
                             .scaleEffect(audioManager.isRunning ? 1.08 : 1.0)
 
-                        // Border ring
                         Circle()
                             .stroke(
                                 audioManager.isRunning ? Color(hex: "FFCC00") : Color(hex: "FFCC00").opacity(0.4),
                                 lineWidth: 3.5
                             )
-                            .frame(width: 105, height: 105)
+                            .frame(width: 110, height: 110)
 
-                        // Center content
                         VStack(spacing: 4) {
                             Image(systemName: "mic.fill")
-                                .font(.system(size: 36, weight: .bold))
+                                .font(.system(size: 38, weight: .bold))
                                 .foregroundColor(audioManager.isRunning ? Color(hex: "FFCC00") : Color(hex: "FFCC00").opacity(0.7))
 
-                            Text(audioManager.isRunning ? "شغال (ON)" : "START")
-                                .font(.system(size: 11, weight: .black, design: .monospaced))
+                            Text(audioManager.isRunning ? "ON" : "START")
+                                .font(.system(size: 12, weight: .black, design: .monospaced))
                                 .foregroundColor(audioManager.isRunning ? Color(hex: "FFCC00") : .white)
                         }
                     }
                 }
-                .padding(.bottom, 14)
+                .padding(.bottom, 16)
 
-                // MARK: - Live Monitor Level Bar
+                // Live Monitor Status Bar
                 VStack(spacing: 3) {
                     HStack {
                         Text("LIVE MONITOR STATUS")
                             .font(.system(size: 9, weight: .bold, design: .monospaced))
                             .foregroundColor(.gray)
                         Spacer()
-                        Text(audioManager.isRunning ? "ACTIVE • سبيكر السماعة شغال" : "STANDBY")
+                        Text(audioManager.isRunning ? "ACTIVE" : "STANDBY")
                             .font(.system(size: 10, weight: .bold, design: .monospaced))
                             .foregroundColor(audioManager.isRunning ? Color(hex: "FFCC00") : .gray)
                     }
@@ -107,24 +102,24 @@ struct ContentView: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 14)
 
-                // MARK: - Sliders & Controls Card
+                // Sliders Card
                 VStack(spacing: 12) {
-                    // Main Boost Slider: 1 to 200 (Super Hearing limit is 66)
+                    // Main Boost Slider: 1 to 100
                     VStack(spacing: 4) {
                         HStack {
-                            Text("قوة التضخيم (BOOST)")
+                            Text("BOOST (قوة التضخيم)")
                                 .font(.system(size: 12, weight: .bold))
                                 .foregroundColor(.white)
 
                             if audioManager.boostLevel > 66 {
-                                Text("🔥 فوق الحد")
+                                Text("🔥 فوق حد 66")
                                     .font(.system(size: 9, weight: .bold))
                                     .foregroundColor(.orange)
                             }
 
                             Spacer()
 
-                            Text("\(Int(audioManager.boostLevel)) / 200")
+                            Text("\(Int(audioManager.boostLevel)) / 100")
                                 .font(.system(size: 14, weight: .black, design: .monospaced))
                                 .foregroundColor(Color(hex: "FFCC00"))
                         }
@@ -134,7 +129,7 @@ struct ContentView: View {
                                 get: { audioManager.boostLevel },
                                 set: { audioManager.setBoost($0) }
                             ),
-                            in: 1.0...200.0,
+                            in: 1.0...100.0,
                             step: 1.0
                         )
                         .accentColor(Color(hex: "FFCC00"))
@@ -149,7 +144,7 @@ struct ContentView: View {
                                 get: { audioManager.isDistortionEnabled },
                                 set: { audioManager.setDistortion(enabled: $0, amount: audioManager.distortionAmount) }
                             )) {
-                                Text("التشويش السلس (SMOOTH DISTORTION)")
+                                Text("SMOOTH DISTORTION (تشويش)")
                                     .font(.system(size: 11, weight: .bold))
                                     .foregroundColor(.white)
                             }
@@ -158,7 +153,7 @@ struct ContentView: View {
 
                         if audioManager.isDistortionEnabled {
                             HStack {
-                                Text("قوة التشويش والخشونة")
+                                Text("Distortion Amount")
                                     .font(.system(size: 10, weight: .medium))
                                     .foregroundColor(.gray)
                                 Spacer()
@@ -188,9 +183,9 @@ struct ContentView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 12)
 
-                // MARK: - Presets
+                // Presets
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("PRESET PROFILES (سيتات)")
+                    Text("PRESET PROFILES")
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .foregroundColor(.gray)
                         .padding(.horizontal, 20)
@@ -234,12 +229,12 @@ struct ContentView: View {
 
                 Spacer(minLength: 4)
 
-                // MARK: - Footer
+                // Footer
                 HStack(spacing: 6) {
                     Image(systemName: "headphones")
                         .foregroundColor(Color(hex: "FFCC00"))
                         .font(.system(size: 10))
-                    Text("Super Hearing Mode Active • تشغيل مباشر بدون قيود")
+                    Text("Super Hearing Engine Active • Live Ear Monitoring")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundColor(.gray)
                 }
