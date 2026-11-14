@@ -15,9 +15,9 @@ targets:
     info:
       path: Info.plist
       properties:
-        CFBundleDisplayName: "Super Hearing Pro"
-        CFBundleShortVersionString: "4.1"
-        CFBundleVersion: "41"
+        CFBundleDisplayName: "Extra Hearing"
+        CFBundleShortVersionString: "4.2"
+        CFBundleVersion: "42"
         LSRequiresIPhoneOS: true
         NSMicrophoneUsageDescription: "The app needs the microphone to amplify sound to your headphones in real time."
         UIBackgroundModes: [audio]

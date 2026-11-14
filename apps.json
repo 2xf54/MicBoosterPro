@@ -3,16 +3,16 @@
   "identifier": "com.ghazi.sources",
   "apps": [
     {
-      "name": "Super Hearing Pro",
+      "name": "Extra Hearing",
       "bundleIdentifier": "com.ghazi.micboosterpro",
       "developerName": "Ghazi",
-      "version": "4.1",
-      "versionDate": "2026-11-14T20:15:00Z",
-      "versionDescription": "Fix: microphone permission + full-screen launch screen (crash on START and black bars fixed).",
+      "version": "4.2",
+      "versionDate": "2026-11-14T20:35:00Z",
+      "versionDescription": "Rebranded to Extra Hearing with red theme and matching red crosshair icon.",
       "downloadURL": "https://github.com/2xf54/MicBoosterPro/releases/download/latest/MicBoosterPro.ipa",
-      "localizedDescription": "ØªØ·Ø¨ÙŠÙ‚ ØªØ¶Ø®ÙŠÙ… Ù…Ø·Ø§Ø¨Ù‚ Ù„Ø´Ø§Ø´Ø§Øª Super Hearing Ø¨Ø§Ù„Ø¶Ø¨Ø· Ù…Ø¹ Ø­Ø¯ 100 ÙˆØ¨Ø¯ÙˆÙ† Ù‚ÙŠÙˆØ¯.",
+      "localizedDescription": "تطبيق تضخيم صوت احترافي Extra Hearing باللون الأحمر وبدون قيود.",
       "iconURL": "https://raw.githubusercontent.com/2xf54/MicBoosterPro/main/icon.png",
-      "tintColor": "E5A912",
+      "tintColor": "FF3B30",
       "size": 300000
     }
   ]

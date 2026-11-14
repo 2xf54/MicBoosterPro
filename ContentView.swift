@@ -17,9 +17,9 @@ struct ContentView: View {
                 // Top half-circle mic badge matching Super Hearing
                 ZStack {
                     Circle()
-                        .fill(Color(hex: "E5A912"))
+                        .fill(Color(hex: "FF3B30"))
                         .frame(width: 54, height: 54)
-                        .shadow(color: Color(hex: "E5A912").opacity(audio.isRunning ? 0.8 : 0.25), radius: 10)
+                        .shadow(color: Color(hex: "FF3B30").opacity(audio.isRunning ? 0.8 : 0.25), radius: 10)
 
                     Image(systemName: "waveform.and.mic")
                         .font(.system(size: 22, weight: .bold))
@@ -34,15 +34,15 @@ struct ContentView: View {
                     VStack(spacing: 3) {
                         ZStack {
                             Circle()
-                                .stroke(Color(hex: "E5A912").opacity(0.4), lineWidth: 1.5)
+                                .stroke(Color(hex: "FF3B30").opacity(0.4), lineWidth: 1.5)
                                 .frame(width: 50, height: 50)
                             Image(systemName: "slider.horizontal.3")
                                 .font(.system(size: 18))
-                                .foregroundColor(Color(hex: "E5A912"))
+                                .foregroundColor(Color(hex: "FF3B30"))
                         }
                         Text("EQ")
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(Color(hex: "E5A912"))
+                            .foregroundColor(Color(hex: "FF3B30"))
                     }
 
                     Spacer()
@@ -51,15 +51,15 @@ struct ContentView: View {
                     VStack(spacing: 3) {
                         ZStack {
                             Circle()
-                                .stroke(Color(hex: "E5A912").opacity(0.4), lineWidth: 1.5)
+                                .stroke(Color(hex: "FF3B30").opacity(0.4), lineWidth: 1.5)
                                 .frame(width: 50, height: 50)
                             Image(systemName: "headphones")
                                 .font(.system(size: 18))
-                                .foregroundColor(Color(hex: "E5A912"))
+                                .foregroundColor(Color(hex: "FF3B30"))
                         }
                         Text("MIC")
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(Color(hex: "E5A912"))
+                            .foregroundColor(Color(hex: "FF3B30"))
                     }
                 }
                 .padding(.horizontal, 40)
@@ -69,11 +69,11 @@ struct ContentView: View {
                 VStack(spacing: 2) {
                     Text("\(audio.volumePercent)%")
                         .font(.system(size: 24, weight: .heavy, design: .rounded))
-                        .foregroundColor(Color(hex: "E5A912"))
+                        .foregroundColor(Color(hex: "FF3B30"))
 
                     Text("VOLUME BOOST")
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundColor(Color(hex: "E5A912").opacity(0.85))
+                        .foregroundColor(Color(hex: "FF3B30").opacity(0.85))
                         .tracking(1)
                 }
                 .padding(.bottom, 8)
@@ -82,14 +82,14 @@ struct ContentView: View {
                 ZStack {
                     // Outer Ring with Ticks around bottom
                     Circle()
-                        .stroke(Color(hex: "E5A912").opacity(0.18), lineWidth: 2)
+                        .stroke(Color(hex: "FF3B30").opacity(0.18), lineWidth: 2)
                         .frame(width: 236, height: 236)
 
                     // Bottom Arc Progress Ring (sweeping along the bottom from left to right like original)
                     Circle()
                         .trim(from: 0.12, to: 0.12 + (CGFloat(audio.volumePercent) / 100.0) * 0.26)
                         .stroke(
-                            Color(hex: "E5A912"),
+                            Color(hex: "FF3B30"),
                             style: StrokeStyle(lineWidth: 6, lineCap: .round)
                         )
                         .frame(width: 236, height: 236)
@@ -121,7 +121,7 @@ struct ContentView: View {
                     }
                     .fill(
                         LinearGradient(
-                            colors: [Color(hex: "E5A912").opacity(0.35), Color.clear],
+                            colors: [Color(hex: "FF3B30").opacity(0.35), Color.clear],
                             startPoint: .top,
                             endPoint: .bottom
                         )
@@ -132,11 +132,11 @@ struct ContentView: View {
                     Circle()
                         .fill(Color(hex: "080e15"))
                         .frame(width: 86, height: 86)
-                        .overlay(Circle().stroke(Color(hex: "E5A912").opacity(0.25), lineWidth: 1))
+                        .overlay(Circle().stroke(Color(hex: "FF3B30").opacity(0.25), lineWidth: 1))
                         .overlay(
                             Text("VOLUME BOOST")
                                 .font(.system(size: 8, weight: .black, design: .monospaced))
-                                .foregroundColor(Color(hex: "E5A912"))
+                                .foregroundColor(Color(hex: "FF3B30"))
                                 .multilineTextAlignment(.center)
                                 .padding(4)
                         )
@@ -150,7 +150,7 @@ struct ContentView: View {
                             Text("boost")
                                 .font(.system(size: 8, weight: .bold))
                         }
-                        .foregroundColor(Color(hex: "E5A912"))
+                        .foregroundColor(Color(hex: "FF3B30"))
                         .padding(.top, 14)
 
                         Spacer()
@@ -162,7 +162,7 @@ struct ContentView: View {
                             Text("tune")
                                 .font(.system(size: 8))
                         }
-                        .foregroundColor(Color(hex: "E5A912").opacity(0.75))
+                        .foregroundColor(Color(hex: "FF3B30").opacity(0.75))
                         .padding(.bottom, 14)
                     }
                     .frame(width: 212, height: 212)
@@ -183,7 +183,7 @@ struct ContentView: View {
                                     .font(.system(size: 8))
                             }
                         }
-                        .foregroundColor(Color(hex: "E5A912").opacity(0.75))
+                        .foregroundColor(Color(hex: "FF3B30").opacity(0.75))
                         .padding(.leading, 18)
 
                         Spacer()
@@ -203,7 +203,7 @@ struct ContentView: View {
                                     .font(.system(size: 8))
                             }
                         }
-                        .foregroundColor(Color(hex: "E5A912").opacity(0.75))
+                        .foregroundColor(Color(hex: "FF3B30").opacity(0.75))
                         .padding(.trailing, 18)
                     }
                     .frame(width: 212, height: 212)
@@ -212,18 +212,18 @@ struct ContentView: View {
                     HStack {
                         Text("0")
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(Color(hex: "E5A912"))
+                            .foregroundColor(Color(hex: "FF3B30"))
                             .frame(width: 20, height: 20)
-                            .background(Circle().stroke(Color(hex: "E5A912"), lineWidth: 1))
+                            .background(Circle().stroke(Color(hex: "FF3B30"), lineWidth: 1))
                             .offset(y: 45)
 
                         Spacer()
 
                         Text("1")
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(Color(hex: "E5A912"))
+                            .foregroundColor(Color(hex: "FF3B30"))
                             .frame(width: 20, height: 20)
-                            .background(Circle().stroke(Color(hex: "E5A912"), lineWidth: 1))
+                            .background(Circle().stroke(Color(hex: "FF3B30"), lineWidth: 1))
                             .offset(y: 45)
                     }
                     .frame(width: 250)
@@ -244,11 +244,11 @@ struct ContentView: View {
                         in: 0...100,
                         step: 1
                     )
-                    .accentColor(Color(hex: "E5A912"))
+                    .accentColor(Color(hex: "FF3B30"))
 
                     Text("100%")
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(Color(hex: "E5A912"))
+                        .foregroundColor(Color(hex: "FF3B30"))
                 }
                 .padding(.horizontal, 32)
                 .padding(.bottom, 14)
@@ -264,14 +264,14 @@ struct ContentView: View {
                     ZStack(alignment: .leading) {
                         Capsule()
                             .fill(Color(hex: "081119"))
-                            .overlay(Capsule().stroke(Color(hex: "E5A912").opacity(0.3), lineWidth: 1))
+                            .overlay(Capsule().stroke(Color(hex: "FF3B30").opacity(0.3), lineWidth: 1))
                             .frame(height: 54)
 
                         HStack {
                             Spacer()
                             Text(audio.isRunning ? "Slide to STOP" : "Slide for start session")
                                 .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color(hex: "E5A912").opacity(0.8))
+                                .foregroundColor(Color(hex: "FF3B30").opacity(0.8))
                             Spacer()
                         }
                         .padding(.leading, 70)
