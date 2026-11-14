@@ -47,19 +47,28 @@ struct ContentView: View {
 
                     Spacer()
 
-                    // MIC Button
-                    VStack(spacing: 3) {
-                        ZStack {
-                            Circle()
-                                .stroke(Color(hex: "FF3B30").opacity(0.4), lineWidth: 1.5)
-                                .frame(width: 50, height: 50)
-                            Image(systemName: "headphones")
-                                .font(.system(size: 18))
-                                .foregroundColor(Color(hex: "FF3B30"))
+                    // MIC Button (Red = Hear Self + Noise, Green = Muted Locally while running)
+                    Button(action: {
+                        audio.toggleMonitoringMute()
+                    }) {
+                        let micColor = audio.isMonitoringMuted ? Color(hex: "10b981") : Color(hex: "FF3B30")
+                        VStack(spacing: 3) {
+                            ZStack {
+                                Circle()
+                                    .stroke(micColor.opacity(0.6), lineWidth: 1.5)
+                                    .frame(width: 50, height: 50)
+                                    .background(
+                                        Circle()
+                                            .fill(audio.isMonitoringMuted ? micColor.opacity(0.18) : Color.clear)
+                                    )
+                                Image(systemName: audio.isMonitoringMuted ? "mic.slash.fill" : "headphones")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(micColor)
+                            }
+                            Text("MIC")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(micColor)
                         }
-                        Text("MIC")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(Color(hex: "FF3B30"))
                     }
                 }
                 .padding(.horizontal, 40)
@@ -230,74 +239,122 @@ struct ContentView: View {
                 }
                 .padding(.bottom, 12)
 
-                // Slider Control
-                HStack(spacing: 10) {
-                    Text("0%")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.gray)
+                // Volume Boost Slider Control
+                VStack(spacing: 10) {
+                    HStack(spacing: 10) {
+                        Text("0%")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.gray)
 
-                    Slider(
-                        value: Binding(
-                            get: { Double(audio.volumePercent) },
-                            set: { audio.setVolume(Int($0)) }
-                        ),
-                        in: 0...100,
-                        step: 1
-                    )
-                    .accentColor(Color(hex: "FF3B30"))
+                        Slider(
+                            value: Binding(
+                                get: { Double(audio.volumePercent) },
+                                set: { audio.setVolume(Int($0)) }
+                            ),
+                            in: 0...100,
+                            step: 1
+                        )
+                        .accentColor(Color(hex: "FF3B30"))
 
-                    Text("100%")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(Color(hex: "FF3B30"))
+                        Text("100%")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(Color(hex: "FF3B30"))
+                    }
+
+                    // Noise / Distortion Slider Control
+                    VStack(spacing: 2) {
+                        HStack {
+                            Text("NOISE / DISTORTION")
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(hex: "FF3B30").opacity(0.85))
+                            Spacer()
+                            Text("\(audio.noisePercent)%")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(Color(hex: "FF3B30"))
+                        }
+
+                        HStack(spacing: 10) {
+                            Text("0%")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.gray)
+
+                            Slider(
+                                value: Binding(
+                                    get: { Double(audio.noisePercent) },
+                                    set: { audio.setNoise(Int($0)) }
+                                ),
+                                in: 0...100,
+                                step: 1
+                            )
+                            .accentColor(Color(hex: "FF3B30"))
+
+                            Text("100%")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(Color(hex: "FF3B30"))
+                        }
+                    }
                 }
                 .padding(.horizontal, 32)
-                .padding(.bottom, 14)
+                .padding(.bottom, 10)
 
                 Spacer()
 
-                // Super Hearing Slide START Button (Guaranteed visible at bottom)
+                // Extra Hearing Slide START / STOP Button (Full-width responsive alignment)
                 Button(action: {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) {
                         audio.toggle()
                     }
                 }) {
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color(hex: "081119"))
-                            .overlay(Capsule().stroke(Color(hex: "FF3B30").opacity(0.3), lineWidth: 1))
-                            .frame(height: 54)
+                    GeometryReader { geo in
+                        let pillWidth: CGFloat = 115
+                        let edgePadding: CGFloat = 4
+                        let maxOffset = max(edgePadding, geo.size.width - pillWidth - edgePadding)
 
-                        HStack {
-                            Spacer()
-                            Text(audio.isRunning ? "Slide to STOP" : "Slide for start session")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color(hex: "FF3B30").opacity(0.8))
-                            Spacer()
-                        }
-                        .padding(.leading, 70)
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Color(hex: "081119"))
+                                .overlay(Capsule().stroke(Color(hex: "FF3B30").opacity(0.3), lineWidth: 1))
+                                .frame(height: 54)
 
-                        HStack(spacing: 4) {
-                            Text(audio.isRunning ? "STOP" : "START")
-                                .font(.system(size: 13, weight: .black))
-                                .foregroundColor(.white)
-                            Image(systemName: "chevron.right.2")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(.white.opacity(0.85))
-                        }
-                        .frame(width: 115, height: 46)
-                        .background(
-                            LinearGradient(
-                                colors: audio.isRunning ? [Color(hex: "10b981"), Color(hex: "059669")] : [Color(hex: "ff4757"), Color(hex: "e84118")],
-                                startPoint: .leading,
-                                endPoint: .trailing
+                            HStack {
+                                if audio.isRunning {
+                                    Text("Slide to STOP")
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(Color(hex: "FF3B30").opacity(0.8))
+                                        .padding(.leading, 24)
+                                    Spacer()
+                                } else {
+                                    Spacer()
+                                    Text("Slide for start session")
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(Color(hex: "FF3B30").opacity(0.8))
+                                        .padding(.trailing, 24)
+                                }
+                            }
+
+                            HStack(spacing: 4) {
+                                Text(audio.isRunning ? "STOP" : "START")
+                                    .font(.system(size: 13, weight: .black))
+                                    .foregroundColor(.white)
+                                Image(systemName: "chevron.right.2")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.white.opacity(0.85))
+                            }
+                            .frame(width: pillWidth, height: 46)
+                            .background(
+                                LinearGradient(
+                                    colors: audio.isRunning ? [Color(hex: "10b981"), Color(hex: "059669")] : [Color(hex: "ff4757"), Color(hex: "e84118")],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
                             )
-                        )
-                        .clipShape(Capsule())
-                        .shadow(color: (audio.isRunning ? Color.green : Color.red).opacity(0.4), radius: 6)
-                        .padding(.leading, 4)
-                        .offset(x: audio.isRunning ? 175 : 0)
-                        .animation(.spring(), value: audio.isRunning)
+                            .clipShape(Capsule())
+                            .shadow(color: (audio.isRunning ? Color.green : Color.red).opacity(0.4), radius: 6)
+                            .offset(x: audio.isRunning ? maxOffset : edgePadding)
+                            .animation(.spring(response: 0.35, dampingFraction: 0.7), value: audio.isRunning)
+                        }
                     }
+                    .frame(height: 54)
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 14)
