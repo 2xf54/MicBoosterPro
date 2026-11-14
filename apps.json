@@ -1,0 +1,19 @@
+{
+  "name": "Ghazi Apps",
+  "identifier": "com.ghazi.sources",
+  "apps": [
+    {
+      "name": "MicBoosterPro",
+      "bundleIdentifier": "com.ghazi.micboosterpro",
+      "developerName": "Ghazi",
+      "version": "1.0.0",
+      "versionDate": "2026-11-14T18:50:00Z",
+      "versionDescription": "الإصدار الأول: تضخيم عالي للمايكروفون حتى +45dB مع تشويش Soft-Clipping Saturation وفلتر Pierce وعمل كامل بالخلفية.",
+      "downloadURL": "https://github.com/2xf54/MicBoosterPro/releases/latest/download/MicBoosterPro.ipa",
+      "localizedDescription": "تطبيق تضخيم المايكروفون والعمل في الخلفية مع مكالمات التيليجرام وغيرها.",
+      "iconURL": "https://raw.githubusercontent.com/2xf54/MicBoosterPro/main/icon.png",
+      "tintColor": "00FF66",
+      "size": 40000
+    }
+  ]
+}

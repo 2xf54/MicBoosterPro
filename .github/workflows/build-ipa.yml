@@ -5,6 +5,9 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-ipa:
     runs-on: macos-latest
@@ -42,3 +45,13 @@ jobs:
           name: MicBoosterPro-IPA
           path: MicBoosterPro.ipa
           retention-days: 14
+
+      - name: Publish or Update Latest Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "MicBoosterPro Latest Build"
+          body: "أحدث نسخة جاهزة للتحميل والتحديث التلقائي عبر AltStore"
+          files: MicBoosterPro.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
