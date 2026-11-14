@@ -6,13 +6,13 @@
       "name": "Super Hearing Pro",
       "bundleIdentifier": "com.ghazi.micboosterpro",
       "developerName": "Ghazi",
-      "version": "3.0.0",
-      "versionDate": "2026-11-14T19:55:00Z",
-      "versionDescription": "إصدار 3.0.0 النهائي: مطابقة كاملة لـ Super Hearing مع حل الكراش نهائياً، حد التضخيم 100 كامل، وزر التشويش السلس وسماع فوري مستقر 100%.",
+      "version": "3.5.0",
+      "versionDate": "2026-11-14T20:00:00Z",
+      "versionDescription": "إصدار 3.5.0: مطابقة تامة 100% لواجهة Super Hearing الرسمية (القرص الدائري، زر START السلايدر الأحمر، النسبة المئوية) مع حد 100 كامل وإصلاح كراش الإذن.",
       "downloadURL": "https://github.com/2xf54/MicBoosterPro/releases/latest/download/MicBoosterPro.ipa",
-      "localizedDescription": "تطبيق تضخيم المايكروفون مطابق لـ Super Hearing مع حد 100 وبدون قيود.",
+      "localizedDescription": "تطبيق تضخيم مطابق لشاشات Super Hearing بالضبط مع حد 100 وبدون قيود.",
       "iconURL": "https://raw.githubusercontent.com/2xf54/MicBoosterPro/main/icon.png",
-      "tintColor": "FFCC00",
+      "tintColor": "E5A912",
       "size": 42000
     }
   ]
