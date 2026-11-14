@@ -2,50 +2,52 @@ import Foundation
 import AVFoundation
 
 class AudioEngineManager: ObservableObject {
-    private var engine = AVAudioEngine()
-    private var intermediateMixer = AVAudioMixerNode()
-    private var eqNode = AVAudioUnitEQ(numberOfBands: 2)
+    private let engine = AVAudioEngine()
+    private let intermediateMixer = AVAudioMixerNode()
+    private let eqNode = AVAudioUnitEQ(numberOfBands: 2)
+    private var isEnginePrepared = false
 
     @Published var isRunning: Bool = false
-    @Published var volumePercent: Int = 73 // 0 to 100 (Default 73% like Super Hearing screenshot)
-    @Published var selectedMode: String = "boost"
+    @Published var volumePercent: Int = 73 // 0 to 100
     @Published var errorMessage: String? = nil
 
     init() {
-        setupSession()
+        // Prepare audio session immediately
+        setupAudioSession()
     }
 
-    func setupSession() {
+    func setupAudioSession() {
         let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(
-                .playAndRecord,
-                mode: .measurement,
-                options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker, .mixWithOthers]
-            )
+            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
+            try session.setPreferredSampleRate(48000)
             try session.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
             print("Session error: \(error.localizedDescription)")
         }
     }
 
-    private func setupEngine() {
-        engine.stop()
-        engine.reset()
+    private func prepareEngineIfNeeded() {
+        guard !isEnginePrepared else { return }
+
+        setupAudioSession()
 
         let inputNode = engine.inputNode
         let inFormat = inputNode.inputFormat(forBus: 0)
 
         guard inFormat.sampleRate > 0 else { return }
 
+        // Attach nodes only ONCE
         engine.attach(intermediateMixer)
         engine.attach(eqNode)
 
+        // Connect inputNode -> intermediateMixer -> eqNode -> mainMixerNode
         engine.connect(inputNode, to: intermediateMixer, format: inFormat)
         let mixFormat = intermediateMixer.outputFormat(forBus: 0)
         engine.connect(intermediateMixer, to: eqNode, format: mixFormat)
         engine.connect(eqNode, to: engine.mainMixerNode, format: mixFormat)
 
+        // EQ filter settings
         let hp = eqNode.bands[0]
         hp.filterType = .highPass
         hp.frequency = 100.0
@@ -59,6 +61,7 @@ class AudioEngineManager: ObservableObject {
 
         updateGains()
         engine.prepare()
+        isEnginePrepared = true
     }
 
     func updateGains() {
@@ -82,8 +85,7 @@ class AudioEngineManager: ObservableObject {
         AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
             guard let self = self, granted else { return }
             DispatchQueue.main.async {
-                self.setupSession()
-                self.setupEngine()
+                self.prepareEngineIfNeeded()
                 do {
                     try self.engine.start()
                     self.isRunning = true
@@ -97,7 +99,7 @@ class AudioEngineManager: ObservableObject {
     }
 
     func stop() {
-        engine.stop()
+        engine.pause()
         isRunning = false
     }
 
