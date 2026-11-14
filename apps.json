@@ -6,13 +6,13 @@
       "name": "MicBoosterPro",
       "bundleIdentifier": "com.ghazi.micboosterpro",
       "developerName": "Ghazi",
-      "version": "1.2.0",
-      "versionDate": "2026-11-14T19:06:00Z",
-      "versionDescription": "تحديث 1.2.0: تحسين وضبط مقاسات الواجهة بالكامل لتناسب جميع شاشات الآيفون والجزيرة التفاعلية بدون فراغات ولا قص للنصوص.",
+      "version": "2.0.0",
+      "versionDate": "2026-11-14T19:15:00Z",
+      "versionDescription": "تحديث 2.0.0 (Super Hearing Pro): حل مشكلة الإغلاق عند الضغط على Start، محاكاة كاملة لسوبر هيرنج وزر المايك الأصفر مع رفع حد التضخيم من 66 إلى 200، وإضافة زر وسلايدر للتشويش السلس (Smooth Distortion).",
       "downloadURL": "https://github.com/2xf54/MicBoosterPro/releases/latest/download/MicBoosterPro.ipa",
       "localizedDescription": "تطبيق تضخيم المايكروفون والعمل في الخلفية مع مكالمات التيليجرام وغيرها.",
       "iconURL": "https://raw.githubusercontent.com/2xf54/MicBoosterPro/main/icon.png",
-      "tintColor": "00FF66",
+      "tintColor": "FFCC00",
       "size": 42000
     }
   ]
