@@ -1,6 +1,7 @@
 import AudioToolbox
 import Photos
 import PhotosUI
+import QuickLook
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -364,6 +365,31 @@ final class RorViewModel: ObservableObject {
         receivedItems = []
         UserDefaults.standard.removeObject(forKey: historyKey)
     }
+
+    func deleteItem(_ item: RorReceivedEntry) {
+        if let p = item.localPath {
+            try? FileManager.default.removeItem(atPath: p)
+        }
+        receivedItems.removeAll { $0.id == item.id }
+        if let data = try? JSONEncoder().encode(receivedItems) {
+            UserDefaults.standard.set(data, forKey: historyKey)
+        }
+    }
+
+    func copyReceivedItem(_ item: RorReceivedEntry) {
+        if let p = item.localPath {
+            if item.type == "image", let img = UIImage(contentsOfFile: p) {
+                UIPasteboard.general.image = img
+                statusText = "Copied image"
+            } else {
+                UIPasteboard.general.url = URL(fileURLWithPath: p)
+                statusText = "Copied \(item.title)"
+            }
+        } else {
+            UIPasteboard.general.string = item.detail
+            statusText = "Copied text"
+        }
+    }
 }
 
 struct ContentView: View {
@@ -375,6 +401,7 @@ struct ContentView: View {
     @State private var showFileImporter = false
     @State private var showCamera = false
     @State private var shareURL: URL?
+    @State private var quickLookURL: URL?
 
     let accent = Color(red: 1.0, green: 0.165, blue: 0.23)
     let autoSyncTimer = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
@@ -593,13 +620,39 @@ struct ContentView: View {
                             ForEach(filteredItems) { item in
                                 Button {
                                     if let p = item.localPath {
-                                        shareURL = URL(fileURLWithPath: p)
+                                        quickLookURL = URL(fileURLWithPath: p)
                                     } else {
                                         UIPasteboard.general.string = item.detail
                                         vm.statusText = "Copied text"
                                     }
                                 } label: {
                                     ReceivedGridCard(item: item, accent: accent)
+                                }
+                                .contextMenu {
+                                    if let p = item.localPath {
+                                        Button {
+                                            quickLookURL = URL(fileURLWithPath: p)
+                                        } label: {
+                                            Label("Quick Look", systemImage: "eye")
+                                        }
+                                    }
+                                    Button {
+                                        vm.copyReceivedItem(item)
+                                    } label: {
+                                        Label("Copy", systemImage: "doc.on.doc")
+                                    }
+                                    if let p = item.localPath {
+                                        Button {
+                                            shareURL = URL(fileURLWithPath: p)
+                                        } label: {
+                                            Label("Share", systemImage: "square.and.arrow.up")
+                                        }
+                                    }
+                                    Button(role: .destructive) {
+                                        vm.deleteItem(item)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
                                 }
                             }
                         }
@@ -684,6 +737,7 @@ struct ContentView: View {
         .sheet(item: $shareURL) { url in
             ShareSheet(activityItems: [url])
         }
+        .quickLookPreview($quickLookURL)
     }
 }
 
