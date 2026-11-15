@@ -1,4 +1,5 @@
 import AudioToolbox
+import AVFoundation
 import Photos
 import PhotosUI
 import QuickLook
@@ -30,6 +31,7 @@ final class RorViewModel: ObservableObject {
 
     private let historyKey = "ror_received_history"
     private let chatKey = "ror_chat_history"
+    private var audioPlayer: AVAudioPlayer?
 
     init() {
         loadHistory()
@@ -248,11 +250,26 @@ final class RorViewModel: ObservableObject {
                     self.isSyncing = false
                     self.statusText = "Received \(decoded.items.count) item(s)"
                     if self.playSounds {
-                        AudioServicesPlaySystemSound(1007)
+                        self.playChime()
                     }
                 }
             }
         }.resume()
+    }
+
+    private func playChime() {
+        guard let url = Bundle.main.url(forResource: "notify", withExtension: "wav") else {
+            AudioServicesPlaySystemSound(1007)
+            return
+        }
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.ambient, options: .mixWithOthers)
+            try AVAudioSession.sharedInstance().setActive(true)
+            audioPlayer = try AVAudioPlayer(contentsOf: url)
+            audioPlayer?.play()
+        } catch {
+            AudioServicesPlaySystemSound(1007)
+        }
     }
 
     private func downloadAndSaveItem(_ item: RorQueueItem, baseURL: String) async {
