@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import Intents
 import Photos
 import UIKit
 
@@ -30,6 +31,35 @@ struct RorChatMessage: Codable, Identifiable {
     let isMe: Bool
     let text: String
     let date: Date
+    var localPath: String? = nil
+    var mediaType: String? = nil // "image", "video", "file", nil
+}
+
+enum RorSiriShareDonor {
+    static func donateWindowsPC() {
+        let handle = INPersonHandle(value: "windows-pc@ror.local", type: .unknown)
+        let recipient = INPerson(
+            personHandle: handle,
+            nameComponents: nil,
+            displayName: "Windows PC",
+            image: nil,
+            contactIdentifier: nil,
+            customIdentifier: "ror-windows-pc"
+        )
+        let intent = INSendMessageIntent(
+            recipients: [recipient],
+            outgoingMessageType: .outgoingMessageText,
+            content: nil,
+            speakableGroupName: INSpeakableString(spokenPhrase: "Windows PC"),
+            conversationIdentifier: "ror-windows-pc",
+            serviceName: "ror",
+            sender: nil,
+            attachments: nil
+        )
+        let interaction = INInteraction(intent: intent, response: nil)
+        interaction.direction = .outgoing
+        interaction.donate { _ in }
+    }
 }
 
 struct RorDiscoveredDevice: Identifiable, Hashable {

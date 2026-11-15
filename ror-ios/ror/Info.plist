@@ -33,6 +33,12 @@
     <string>ror saves received photos and videos directly to your Photos library.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>ror lets you pick photos and videos to send to your PC.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>ror lets you capture a photo to send straight to your PC.</string>
+    <key>NSUserActivityTypes</key>
+    <array>
+        <string>INSendMessageIntent</string>
+    </array>
     <key>UILaunchScreen</key>
     <dict>
         <key>UIColorName</key>

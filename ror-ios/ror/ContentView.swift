@@ -21,6 +21,7 @@ final class RorViewModel: ObservableObject {
     @Published var showSettings: Bool = false
     @Published var showSetupSheet: Bool = false
     @Published var showChatSheet: Bool = false
+    @Published var showWindowsPCSheet: Bool = false
     @Published var showManualEntry: Bool = false
     @Published var playSounds: Bool = UserDefaults.standard.object(forKey: "ror_play_sounds") as? Bool ?? true {
         didSet { UserDefaults.standard.set(playSounds, forKey: "ror_play_sounds") }
@@ -33,7 +34,8 @@ final class RorViewModel: ObservableObject {
         loadHistory()
         loadChat()
         if isPaired {
-            syncFromPC()
+            RorSiriShareDonor.donateWindowsPC()
+            syncFromPC(silent: true)
         } else {
             scanNearby()
         }
@@ -67,8 +69,9 @@ final class RorViewModel: ObservableObject {
         isPaired = true
         showSetupSheet = false
         showSettings = false
-        statusText = "Connected to \(device.deviceName)"
-        syncFromPC()
+        statusText = "Connected to Windows PC"
+        RorSiriShareDonor.donateWindowsPC()
+        syncFromPC(silent: true)
     }
 
     func disconnect() {
@@ -100,8 +103,9 @@ final class RorViewModel: ObservableObject {
                     self?.isPaired = true
                     self?.showSetupSheet = false
                     self?.showSettings = false
-                    self?.statusText = "Connected to \(name)"
-                    self?.syncFromPC()
+                    self?.statusText = "Connected to Windows PC"
+                    RorSiriShareDonor.donateWindowsPC()
+                    self?.syncFromPC(silent: true)
                 case .failure(let err):
                     self?.statusText = "Failed: \(err.localizedDescription)"
                 }
@@ -109,17 +113,37 @@ final class RorViewModel: ObservableObject {
         }
     }
 
+    func pasteFromClipboard() {
+        if let img = UIPasteboard.general.image, let data = img.jpegData(compressionQuality: 0.92) {
+            let name = "paste_\(Int(Date().timeIntervalSince1970)).jpg"
+            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+            try? data.write(to: tmp)
+            sendBatchFiles([(tmp, name)], mediaTypes: ["image"])
+            return
+        }
+        if let txt = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines), !txt.isEmpty {
+            sendTextValue(txt)
+            return
+        }
+        statusText = "Clipboard is empty"
+    }
+
     func sendText() {
         let trimmed = textToSend.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         textToSend = ""
-        appendChat(RorChatMessage(id: UUID().uuidString, isMe: true, text: trimmed, date: Date()))
+        sendTextValue(trimmed)
+    }
+
+    func sendTextValue(_ text: String) {
+        appendChat(RorChatMessage(id: UUID().uuidString, isMe: true, text: text, date: Date()))
+        RorSiriShareDonor.donateWindowsPC()
         statusText = "Sending..."
-        RorNetwork.uploadText(trimmed) { [weak self] res in
+        RorNetwork.uploadText(text) { [weak self] res in
             DispatchQueue.main.async {
                 switch res {
                 case .success:
-                    self?.statusText = "Sent to \(self?.pcName.isEmpty == false ? self!.pcName : "Windows PC")"
+                    self?.statusText = "Sent to Windows PC"
                 case .failure(let err):
                     self?.statusText = "Send failed: \(err.localizedDescription)"
                 }
@@ -127,11 +151,17 @@ final class RorViewModel: ObservableObject {
         }
     }
 
-    func sendBatchFiles(_ files: [(url: URL, filename: String)]) {
+    func sendBatchFiles(_ files: [(url: URL, filename: String)], mediaTypes: [String] = []) {
         guard !files.isEmpty else { return }
         let batchId = UUID().uuidString
         let total = files.count
         statusText = total == 1 ? "Sending \(files[0].filename)..." : "Sending \(total) items..."
+        RorSiriShareDonor.donateWindowsPC()
+
+        for (idx, item) in files.enumerated() {
+            let mtype = idx < mediaTypes.count ? mediaTypes[idx] : "file"
+            appendChat(RorChatMessage(id: UUID().uuidString, isMe: true, text: item.filename, date: Date(), localPath: nil, mediaType: mtype))
+        }
 
         Task {
             var okCount = 0
@@ -159,6 +189,8 @@ final class RorViewModel: ObservableObject {
 
     func sendLocalFile(_ url: URL, batchId: String? = nil, batchCount: Int = 1) {
         statusText = "Sending \(url.lastPathComponent)..."
+        RorSiriShareDonor.donateWindowsPC()
+        appendChat(RorChatMessage(id: UUID().uuidString, isMe: true, text: url.lastPathComponent, date: Date(), localPath: nil, mediaType: "file"))
         RorNetwork.uploadFile(fileURL: url, filename: url.lastPathComponent, batchId: batchId, batchCount: batchCount) { [weak self] res in
             DispatchQueue.main.async {
                 switch res {
@@ -171,14 +203,15 @@ final class RorViewModel: ObservableObject {
         }
     }
 
-    func syncFromPC() {
-        guard let base = RorConfigStore.baseURLString,
+    func syncFromPC(silent: Bool = false) {
+        guard !isSyncing,
+              let base = RorConfigStore.baseURLString,
               let url = URL(string: "\(base)/queue"),
               !RorConfigStore.pairKey.isEmpty else { return }
 
         isSyncing = true
         var req = URLRequest(url: url)
-        req.timeoutInterval = 8
+        req.timeoutInterval = 6
         req.setValue(RorConfigStore.pairKey, forHTTPHeaderField: "X-Pair-Key")
 
         URLSession.shared.dataTask(with: req) { [weak self] data, resp, err in
@@ -186,7 +219,7 @@ final class RorViewModel: ObservableObject {
             if let err = err {
                 DispatchQueue.main.async {
                     self.isSyncing = false
-                    self.statusText = "Offline: \(err.localizedDescription)"
+                    if !silent { self.statusText = "Offline: \(err.localizedDescription)" }
                 }
                 return
             }
@@ -195,14 +228,14 @@ final class RorViewModel: ObservableObject {
                 DispatchQueue.main.async {
                     self.isSyncing = false
                     let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-                    if code == 401 { self.statusText = "Invalid Pair Key" }
+                    if code == 401 && !silent { self.statusText = "Invalid Pair Key" }
                 }
                 return
             }
             if decoded.items.isEmpty {
                 DispatchQueue.main.async {
                     self.isSyncing = false
-                    self.statusText = "Synced"
+                    if !silent { self.statusText = "Synced" }
                 }
                 return
             }
@@ -254,6 +287,7 @@ final class RorViewModel: ObservableObject {
             }
 
             await MainActor.run {
+                self.appendChat(RorChatMessage(id: item.id, isMe: false, text: item.filename, date: Date(), localPath: dest.path, mediaType: item.type))
                 self.addHistory(RorReceivedEntry(id: item.id, type: item.type, title: item.filename, detail: detail, localPath: dest.path, date: Date()))
             }
             await ackItem(item.id, baseURL: baseURL)
@@ -261,6 +295,14 @@ final class RorViewModel: ObservableObject {
             await MainActor.run {
                 self.statusText = "Download error: \(error.localizedDescription)"
             }
+        }
+    }
+
+    func saveMediaToPhotos(path: String, isVideo: Bool, completion: @escaping (Bool) -> Void) {
+        let url = URL(fileURLWithPath: path)
+        Task {
+            let ok = await saveToPhotos(url: url, isVideo: isVideo)
+            await MainActor.run { completion(ok) }
         }
     }
 
@@ -326,14 +368,16 @@ final class RorViewModel: ObservableObject {
 
 struct ContentView: View {
     @ObservedObject var vm: RorViewModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var searchText: String = ""
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
-    @State private var showSendMenu = false
+    @State private var showCamera = false
     @State private var shareURL: URL?
 
     let accent = Color(red: 1.0, green: 0.165, blue: 0.23)
+    let autoSyncTimer = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
 
     var filteredItems: [RorReceivedEntry] {
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -354,7 +398,7 @@ struct ContentView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    // Top Bar: Gear | ror | Sync
+                    // Top Bar: Gear | Rg | Sync
                     HStack {
                         Button {
                             vm.showSettings = true
@@ -369,8 +413,8 @@ struct ContentView: View {
 
                         Spacer()
 
-                        Text("ror")
-                            .font(.system(size: 19, weight: .bold))
+                        Text("Rg")
+                            .font(.system(size: 20, weight: .bold))
                             .foregroundColor(.white)
 
                         Spacer()
@@ -387,7 +431,7 @@ struct ContentView: View {
                         }
                     }
 
-                    // Search Bar (Blip style)
+                    // Search Bar
                     HStack(spacing: 10) {
                         Image(systemName: "magnifyingglass")
                             .foregroundColor(Color(white: 0.55))
@@ -406,12 +450,12 @@ struct ContentView: View {
                     .background(Color(white: 0.13))
                     .clipShape(Capsule())
 
-                    // Device Circles Row (Blip style)
+                    // Device Circles Row
                     HStack(alignment: .top, spacing: 18) {
-                        // Windows PC Circle (Tap to send)
+                        // Windows PC Circle (Tap to open Blip-style action sheet)
                         Button {
                             if vm.isPaired {
-                                showSendMenu = true
+                                vm.showWindowsPCSheet = true
                             } else {
                                 vm.showSetupSheet = true
                             }
@@ -425,7 +469,7 @@ struct ContentView: View {
                                         .font(.system(size: 27, weight: .medium))
                                         .foregroundColor(.white)
                                 }
-                                Text(vm.pcName.isEmpty ? "Windows PC" : vm.pcName)
+                                Text("Windows PC")
                                     .font(.system(size: 12))
                                     .foregroundColor(.white)
                                     .lineLimit(1)
@@ -469,7 +513,7 @@ struct ContentView: View {
                                         .frame(width: 68, height: 68)
                                     Image(systemName: "bubble.left.and.bubble.right.fill")
                                         .font(.system(size: 23, weight: .medium))
-                                        .foregroundColor(Color(red: 0.25, green: 0.65, blue: 1.0))
+                                        .foregroundColor(accent)
                                 }
                                 Text("Chat")
                                     .font(.system(size: 12))
@@ -525,14 +569,14 @@ struct ContentView: View {
                             } label: {
                                 Image(systemName: "ellipsis")
                                     .font(.system(size: 18, weight: .bold))
-                                    .foregroundColor(Color(red: 0.25, green: 0.65, blue: 1.0))
+                                    .foregroundColor(accent)
                                     .padding(8)
                             }
                         }
                     }
                     .padding(.top, 4)
 
-                    // Received 2-Column Grid (Blip style)
+                    // Received 2-Column Grid
                     if filteredItems.isEmpty {
                         VStack(spacing: 10) {
                             Image(systemName: "tray")
@@ -567,11 +611,10 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .confirmationDialog("Send to \(vm.pcName.isEmpty ? "Windows PC" : vm.pcName)", isPresented: $showSendMenu, titleVisibility: .visible) {
-            Button("Photos & Videos (Multi-select)") { showPhotoPicker = true }
-            Button("Files") { showFileImporter = true }
-            Button("Chat / Message") { vm.showChatSheet = true }
-            Button("Cancel", role: .cancel) {}
+        .onReceive(autoSyncTimer) { _ in
+            if scenePhase == .active && vm.isPaired {
+                vm.syncFromPC(silent: true)
+            }
         }
         .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItems, maxSelectionCount: 0, matching: .any(of: [.images, .videos]))
         .onChange(of: selectedPhotoItems) { items in
@@ -580,17 +623,21 @@ struct ContentView: View {
             selectedPhotoItems = []
             Task {
                 var prepared: [(URL, String)] = []
+                var mtypes: [String] = []
                 for item in picked {
                     if let data = try? await item.loadTransferable(type: Data.self) {
-                        let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
+                        let ut = item.supportedContentTypes.first
+                        let ext = ut?.preferredFilenameExtension ?? "jpg"
+                        let isVid = ut?.conforms(to: .movie) == true || ut?.conforms(to: .video) == true
                         let name = "ror_\(Int(Date().timeIntervalSince1970))_\(UUID().uuidString.prefix(4)).\(ext)"
                         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(name)
                         try? data.write(to: tmp)
                         prepared.append((tmp, name))
+                        mtypes.append(isVid ? "video" : "image")
                     }
                 }
                 await MainActor.run {
-                    vm.sendBatchFiles(prepared)
+                    vm.sendBatchFiles(prepared, mediaTypes: mtypes)
                 }
             }
         }
@@ -603,6 +650,27 @@ struct ContentView: View {
                     if accessed { url.stopAccessingSecurityScopedResource() }
                 }
             }
+        }
+        .sheet(isPresented: $showCamera) {
+            CameraPicker { image in
+                if let data = image.jpegData(compressionQuality: 0.92) {
+                    let name = "cam_\(Int(Date().timeIntervalSince1970)).jpg"
+                    let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+                    try? data.write(to: tmp)
+                    vm.sendBatchFiles([(tmp, name)], mediaTypes: ["image"])
+                }
+            }
+        }
+        .sheet(isPresented: $vm.showWindowsPCSheet) {
+            WindowsPCSheetView(
+                vm: vm,
+                accent: accent,
+                onPaste: { vm.pasteFromClipboard() },
+                onSendPhotos: { showPhotoPicker = true },
+                onSendFiles: { showFileImporter = true },
+                onCapturePhoto: { showCamera = true },
+                onOpenChat: { vm.showChatSheet = true }
+            )
         }
         .sheet(isPresented: $vm.showSettings) {
             SettingsSheetView(vm: vm, accent: accent)
@@ -621,6 +689,110 @@ struct ContentView: View {
 
 extension URL: @retroactive Identifiable {
     public var id: String { absoluteString }
+}
+
+struct WindowsPCSheetView: View {
+    @ObservedObject var vm: RorViewModel
+    let accent: Color
+    let onPaste: () -> Void
+    let onSendPhotos: () -> Void
+    let onSendFiles: () -> Void
+    let onCapturePhoto: () -> Void
+    let onOpenChat: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack {
+            Color(red: 0.08, green: 0.08, blue: 0.09).ignoresSafeArea()
+            VStack(spacing: 0) {
+                HStack {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 36, height: 36)
+                            .background(Color(white: 0.18))
+                            .clipShape(Circle())
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
+
+                ZStack {
+                    Circle()
+                        .fill(accent)
+                        .frame(width: 84, height: 84)
+                    Image(systemName: "desktopcomputer")
+                        .font(.system(size: 36, weight: .medium))
+                        .foregroundColor(.white)
+                }
+                .padding(.top, 8)
+
+                Text("Windows PC")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.top, 12)
+
+                Text("Your computer")
+                    .font(.system(size: 15))
+                    .foregroundColor(.gray)
+                    .padding(.top, 2)
+
+                Divider()
+                    .background(Color(white: 0.2))
+                    .padding(.vertical, 22)
+                    .padding(.horizontal, 20)
+
+                VStack(spacing: 18) {
+                    sheetRow(icon: "doc.on.clipboard.fill", color: Color(red: 0.18, green: 0.78, blue: 0.45), title: "Paste") {
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { onPaste() }
+                    }
+                    sheetRow(icon: "photo.fill", color: accent, title: "Send Photos") {
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { onSendPhotos() }
+                    }
+                    sheetRow(icon: "folder.fill", color: Color(red: 1.0, green: 0.42, blue: 0.28), title: "Send Files") {
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { onSendFiles() }
+                    }
+                    sheetRow(icon: "camera.fill", color: Color(white: 0.48), title: "Capture a Photo") {
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { onCapturePhoto() }
+                    }
+                    sheetRow(icon: "bubble.left.and.bubble.right.fill", color: Color(red: 0.25, green: 0.65, blue: 1.0), title: "Open Chat") {
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { onOpenChat() }
+                    }
+                }
+                .padding(.horizontal, 24)
+
+                Spacer()
+            }
+        }
+        .preferredColorScheme(.dark)
+        .presentationDetents([.medium, .large])
+    }
+
+    private func sheetRow(icon: String, color: Color, title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(color)
+                        .frame(width: 40, height: 40)
+                    Image(systemName: icon)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.white)
+                }
+                Text(title)
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundColor(.white)
+                Spacer()
+            }
+        }
+    }
 }
 
 struct ReceivedGridCard: View {
@@ -695,6 +867,12 @@ struct ChatSheetView: View {
     @ObservedObject var vm: RorViewModel
     let accent: Color
     @Environment(\.dismiss) private var dismiss
+    @State private var showAttachMenu = false
+    @State private var showChatPhotos = false
+    @State private var showChatFiles = false
+    @State private var chatPhotoItems: [PhotosPickerItem] = []
+    @State private var toastText: String? = nil
+    @State private var shareFileURL: URL?
 
     var body: some View {
         NavigationStack {
@@ -713,13 +891,40 @@ struct ChatSheetView: View {
                                 ForEach(vm.chatMessages) { msg in
                                     HStack {
                                         if msg.isMe { Spacer(minLength: 50) }
-                                        Text(msg.text)
-                                            .font(.system(size: 15))
-                                            .foregroundColor(.white)
-                                            .padding(.horizontal, 14)
-                                            .padding(.vertical, 10)
-                                            .background(msg.isMe ? accent : Color(white: 0.16))
-                                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                                        chatBubble(msg)
+                                            .onTapGesture {
+                                                if msg.mediaType == nil {
+                                                    UIPasteboard.general.string = msg.text
+                                                    showToast("Copy ✓")
+                                                } else if let p = msg.localPath {
+                                                    shareFileURL = URL(fileURLWithPath: p)
+                                                }
+                                            }
+                                            .contextMenu {
+                                                if let p = msg.localPath {
+                                                    if msg.mediaType == "image" || msg.mediaType == "video" {
+                                                        Button {
+                                                            vm.saveMediaToPhotos(path: p, isVideo: msg.mediaType == "video") { ok in
+                                                                showToast(ok ? "Saved ✓" : "Failed")
+                                                            }
+                                                        } label: {
+                                                            Label("Save", systemImage: "square.and.arrow.down")
+                                                        }
+                                                    } else {
+                                                        Button {
+                                                            shareFileURL = URL(fileURLWithPath: p)
+                                                        } label: {
+                                                            Label("Save / Share", systemImage: "square.and.arrow.up")
+                                                        }
+                                                    }
+                                                }
+                                                Button {
+                                                    UIPasteboard.general.string = msg.text
+                                                    showToast("Copy ✓")
+                                                } label: {
+                                                    Label("Copy", systemImage: "doc.on.doc")
+                                                }
+                                            }
                                         if !msg.isMe { Spacer(minLength: 50) }
                                     }
                                     .id(msg.id)
@@ -734,7 +939,19 @@ struct ChatSheetView: View {
                         }
                     }
 
+                    // Bottom Chat Input with + Attach button on the left
                     HStack(spacing: 10) {
+                        Button {
+                            showAttachMenu = true
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 36, height: 36)
+                                .background(Color(white: 0.16))
+                                .clipShape(Circle())
+                        }
+
                         TextField("Message PC...", text: $vm.textToSend)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
@@ -754,19 +971,122 @@ struct ChatSheetView: View {
                     .padding()
                     .background(Color(white: 0.07))
                 }
+
+                if let t = toastText {
+                    VStack {
+                        Text(t)
+                            .font(.subheadline.bold())
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Color.green)
+                            .clipShape(Capsule())
+                            .padding(.top, 14)
+                        Spacer()
+                    }
+                    .transition(.opacity)
+                }
             }
             .navigationTitle("Chat")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { vm.syncFromPC() } label: { Image(systemName: "arrow.clockwise") }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
             }
+            .confirmationDialog("Attach to Chat", isPresented: $showAttachMenu) {
+                Button("Photos & Videos") { showChatPhotos = true }
+                Button("Files") { showChatFiles = true }
+                Button("Cancel", role: .cancel) {}
+            }
+            .photosPicker(isPresented: $showChatPhotos, selection: $chatPhotoItems, maxSelectionCount: 0, matching: .any(of: [.images, .videos]))
+            .onChange(of: chatPhotoItems) { items in
+                guard !items.isEmpty else { return }
+                let picked = items
+                chatPhotoItems = []
+                Task {
+                    var prepared: [(URL, String)] = []
+                    var mtypes: [String] = []
+                    for item in picked {
+                        if let data = try? await item.loadTransferable(type: Data.self) {
+                            let ut = item.supportedContentTypes.first
+                            let ext = ut?.preferredFilenameExtension ?? "jpg"
+                            let isVid = ut?.conforms(to: .movie) == true || ut?.conforms(to: .video) == true
+                            let name = "ror_\(Int(Date().timeIntervalSince1970))_\(UUID().uuidString.prefix(4)).\(ext)"
+                            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+                            try? data.write(to: tmp)
+                            prepared.append((tmp, name))
+                            mtypes.append(isVid ? "video" : "image")
+                        }
+                    }
+                    await MainActor.run {
+                        vm.sendBatchFiles(prepared, mediaTypes: mtypes)
+                    }
+                }
+            }
+            .fileImporter(isPresented: $showChatFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+                if case .success(let urls) = result {
+                    let batchId = UUID().uuidString
+                    for url in urls {
+                        let accessed = url.startAccessingSecurityScopedResource()
+                        vm.sendLocalFile(url, batchId: batchId, batchCount: urls.count)
+                        if accessed { url.stopAccessingSecurityScopedResource() }
+                    }
+                }
+            }
+            .sheet(item: $shareFileURL) { url in
+                ShareSheet(activityItems: [url])
+            }
         }
         .preferredColorScheme(.dark)
+    }
+
+    @ViewBuilder
+    private func chatBubble(_ msg: RorChatMessage) -> some View {
+        if let path = msg.localPath, msg.mediaType == "image", let img = UIImage(contentsOfFile: path) {
+            VStack(alignment: .leading, spacing: 4) {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: 210, maxHeight: 210)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                Text("Hold to Save")
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.6))
+            }
+            .padding(6)
+            .background(msg.isMe ? accent : Color(white: 0.16))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+        } else if msg.mediaType != nil {
+            HStack(spacing: 8) {
+                Image(systemName: msg.mediaType == "video" ? "video.fill" : "doc.fill")
+                Text(msg.text)
+                    .lineLimit(1)
+            }
+            .font(.system(size: 14, weight: .medium))
+            .foregroundColor(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(msg.isMe ? accent : Color(white: 0.16))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+        } else {
+            Text(msg.text)
+                .font(.system(size: 15))
+                .foregroundColor(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(msg.isMe ? accent : Color(white: 0.16))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+        }
+    }
+
+    private func showToast(_ text: String) {
+        withAnimation { toastText = text }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            withAnimation {
+                if toastText == text { toastText = nil }
+            }
+        }
     }
 }
 
@@ -862,7 +1182,7 @@ struct SettingsSheetView: View {
                                 Image(systemName: "desktopcomputer").foregroundColor(.white).font(.caption)
                             }
                             VStack(alignment: .leading) {
-                                Text(vm.pcName.isEmpty ? "Windows PC" : vm.pcName).foregroundColor(.white)
+                                Text("Windows PC").foregroundColor(.white)
                                 Text("Computer").font(.caption).foregroundColor(.gray)
                             }
                         }
@@ -900,6 +1220,34 @@ struct SettingsSheetView: View {
             }
         }
         .preferredColorScheme(.dark)
+    }
+}
+
+struct CameraPicker: UIViewControllerRepresentable {
+    let onCapture: (UIImage) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = UIImagePickerController.isSourceTypeAvailable(.camera) ? .camera : .photoLibrary
+        picker.delegate = context.coordinator
+        return picker
+    }
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
+        let parent: CameraPicker
+        init(_ parent: CameraPicker) { self.parent = parent }
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            if let img = info[.originalImage] as? UIImage {
+                parent.onCapture(img)
+            }
+            parent.dismiss()
+        }
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.dismiss()
+        }
     }
 }
 
