@@ -1,10 +1,12 @@
 import AudioToolbox
 import AVFoundation
+import AVKit
 import Photos
 import PhotosUI
 import QuickLook
 import SwiftUI
 import UniformTypeIdentifiers
+import UserNotifications
 
 @MainActor
 final class RorViewModel: ObservableObject {
@@ -161,9 +163,21 @@ final class RorViewModel: ObservableObject {
         statusText = total == 1 ? "Sending \(files[0].filename)..." : "Sending \(total) items..."
         RorSiriShareDonor.donateWindowsPC()
 
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let sentDir = docs.appendingPathComponent("ror_sent", isDirectory: true)
+        try? FileManager.default.createDirectory(at: sentDir, withIntermediateDirectories: true)
+
         for (idx, item) in files.enumerated() {
             let mtype = idx < mediaTypes.count ? mediaTypes[idx] : "file"
-            appendChat(RorChatMessage(id: UUID().uuidString, isMe: true, text: item.filename, date: Date(), localPath: nil, mediaType: mtype))
+            var savedLocalPath: String? = nil
+            if mtype == "image" || mtype == "video" {
+                let dest = sentDir.appendingPathComponent(item.filename)
+                try? FileManager.default.removeItem(at: dest)
+                if (try? FileManager.default.copyItem(at: item.url, to: dest)) != nil {
+                    savedLocalPath = dest.path
+                }
+            }
+            appendChat(RorChatMessage(id: UUID().uuidString, isMe: true, text: item.filename, date: Date(), localPath: savedLocalPath, mediaType: mtype))
         }
 
         Task {
@@ -249,12 +263,58 @@ final class RorViewModel: ObservableObject {
                 await MainActor.run {
                     self.isSyncing = false
                     self.statusText = "Received \(decoded.items.count) item(s)"
-                    if self.playSounds {
+                    if UIApplication.shared.applicationState != .active {
+                        Self.postLocalNotification(
+                            count: decoded.items.count,
+                            firstTitle: decoded.items.first?.type == "text"
+                                ? (decoded.items.first?.text ?? "New message")
+                                : (decoded.items.first?.filename ?? "New file"),
+                            playSound: self.playSounds
+                        )
+                    } else if self.playSounds {
                         self.playChime()
                     }
                 }
             }
         }.resume()
+    }
+
+    static func performBackgroundSync() async -> Bool {
+        guard let base = RorConfigStore.baseURLString,
+              let url = URL(string: "\(base)/queue"),
+              !RorConfigStore.pairKey.isEmpty else { return false }
+
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 10
+        req.setValue(RorConfigStore.pairKey, forHTTPHeaderField: "X-Pair-Key")
+
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let decoded = try? JSONDecoder().decode(RorQueueResponse.self, from: data),
+              !decoded.items.isEmpty else {
+            return true
+        }
+
+        let playSounds = UserDefaults.standard.object(forKey: "ror_play_sounds") as? Bool ?? true
+        let firstTitle = decoded.items.first?.type == "text"
+            ? (decoded.items.first?.text ?? "New message")
+            : (decoded.items.first?.filename ?? "New file")
+        postLocalNotification(count: decoded.items.count, firstTitle: firstTitle, playSound: playSounds)
+        return true
+    }
+
+    static func postLocalNotification(count: Int, firstTitle: String, playSound: Bool) {
+        let content = UNMutableNotificationContent()
+        content.title = "Windows PC"
+        content.body = count == 1 ? firstTitle : "\(count) new items from Windows PC"
+        if playSound {
+            content.sound = UNNotificationSound(named: UNNotificationSoundName("notify.wav"))
+        }
+        let req = UNNotificationRequest(
+            identifier: "ror_\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
     }
 
     private func playChime() {
@@ -419,6 +479,7 @@ struct ContentView: View {
     @State private var showCamera = false
     @State private var shareURL: URL?
     @State private var quickLookURL: URL?
+    @State private var videoPlayerURL: URL?
 
     let accent = Color(red: 1.0, green: 0.165, blue: 0.23)
     let autoSyncTimer = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
@@ -463,16 +524,8 @@ struct ContentView: View {
 
                         Spacer()
 
-                        Button {
-                            if vm.isPaired { vm.syncFromPC() } else { vm.scanNearby() }
-                        } label: {
-                            Image(systemName: vm.isSyncing ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
-                                .font(.system(size: 17, weight: .medium))
-                                .foregroundColor(.white)
-                                .frame(width: 40, height: 40)
-                                .background(Color(white: 0.14))
-                                .clipShape(Circle())
-                        }
+                        Color.clear
+                            .frame(width: 40, height: 40)
                     }
 
                     // Search Bar
@@ -637,7 +690,11 @@ struct ContentView: View {
                             ForEach(filteredItems) { item in
                                 Button {
                                     if let p = item.localPath {
-                                        quickLookURL = URL(fileURLWithPath: p)
+                                        if item.type == "video" {
+                                            videoPlayerURL = URL(fileURLWithPath: p)
+                                        } else {
+                                            quickLookURL = URL(fileURLWithPath: p)
+                                        }
                                     } else {
                                         UIPasteboard.general.string = item.detail
                                         vm.statusText = "Copied text"
@@ -753,6 +810,9 @@ struct ContentView: View {
         }
         .sheet(item: $shareURL) { url in
             ShareSheet(activityItems: [url])
+        }
+        .fullScreenCover(item: $videoPlayerURL) { url in
+            VideoPlayerSheet(url: url)
         }
         .quickLookPreview($quickLookURL)
     }
@@ -915,6 +975,8 @@ struct ReceivedGridCard: View {
             Image(uiImage: uiImg)
                 .resizable()
                 .scaledToFill()
+        } else if item.type == "video", let path = item.localPath {
+            VideoThumbnailView(url: URL(fileURLWithPath: path))
         } else if item.type == "text" {
             VStack {
                 Image(systemName: "text.bubble.fill")
@@ -927,9 +989,7 @@ struct ReceivedGridCard: View {
                     .padding(.horizontal, 10)
             }
         } else {
-            Image(systemName: item.type == "video" ? "video.fill" : "doc.fill")
-                .font(.system(size: 36))
-                .foregroundColor(.white.opacity(0.75))
+            FileBubbleCard(filename: item.title, isGrid: true)
         }
     }
 }
@@ -944,6 +1004,7 @@ struct ChatSheetView: View {
     @State private var chatPhotoItems: [PhotosPickerItem] = []
     @State private var toastText: String? = nil
     @State private var shareFileURL: URL?
+    @State private var videoPlayerURL: URL?
 
     var body: some View {
         NavigationStack {
@@ -972,7 +1033,11 @@ struct ChatSheetView: View {
                                                         showToast("Copy ✓")
                                                     }
                                                 } else if let p = msg.localPath {
-                                                    shareFileURL = URL(fileURLWithPath: p)
+                                                    if msg.mediaType == "video" {
+                                                        videoPlayerURL = URL(fileURLWithPath: p)
+                                                    } else {
+                                                        shareFileURL = URL(fileURLWithPath: p)
+                                                    }
                                                 }
                                             }
                                             .contextMenu {
@@ -1119,6 +1184,9 @@ struct ChatSheetView: View {
             .sheet(item: $shareFileURL) { url in
                 ShareSheet(activityItems: [url])
             }
+            .fullScreenCover(item: $videoPlayerURL) { url in
+                VideoPlayerSheet(url: url)
+            }
         }
         .preferredColorScheme(.dark)
     }
@@ -1139,18 +1207,22 @@ struct ChatSheetView: View {
             .padding(6)
             .background(msg.isMe ? accent : Color(white: 0.16))
             .clipShape(RoundedRectangle(cornerRadius: 16))
-        } else if msg.mediaType != nil {
-            HStack(spacing: 8) {
-                Image(systemName: msg.mediaType == "video" ? "video.fill" : "doc.fill")
-                Text(msg.text)
-                    .lineLimit(1)
+        } else if let path = msg.localPath, msg.mediaType == "video" {
+            VStack(alignment: .leading, spacing: 4) {
+                VideoThumbnailView(url: URL(fileURLWithPath: path))
+                    .frame(width: 210, height: 150)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                Text("Tap to Play • Hold to Save")
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.65))
             }
-            .font(.system(size: 14, weight: .medium))
-            .foregroundColor(.white)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(6)
             .background(msg.isMe ? accent : Color(white: 0.16))
             .clipShape(RoundedRectangle(cornerRadius: 16))
+        } else if msg.mediaType != nil {
+            FileBubbleCard(filename: msg.text, isGrid: false)
+                .background(msg.isMe ? accent : Color(white: 0.16))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
         } else {
             let cleanText = cleanMessageText(msg.text)
             let isLink = detectURL(in: cleanText) != nil
@@ -1357,4 +1429,119 @@ struct ShareSheet: UIViewControllerRepresentable {
         UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
     }
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+
+struct VideoThumbnailView: View {
+    let url: URL
+    @State private var thumbnail: UIImage? = nil
+
+    var body: some View {
+        ZStack {
+            if let img = thumbnail {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Color(white: 0.12)
+            }
+
+            Circle()
+                .fill(Color.black.opacity(0.62))
+                .frame(width: 48, height: 48)
+                .overlay(
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(.white)
+                        .offset(x: 2)
+                )
+        }
+        .clipped()
+        .task(id: url.path) {
+            thumbnail = await Self.generateThumbnail(for: url)
+        }
+    }
+
+    private static func generateThumbnail(for url: URL) async -> UIImage? {
+        await Task.detached(priority: .utility) {
+            let asset = AVURLAsset(url: url)
+            let gen = AVAssetImageGenerator(asset: asset)
+            gen.appliesPreferredTrackTransform = true
+            gen.maximumSize = CGSize(width: 480, height: 480)
+            let time = CMTime(seconds: 0.2, preferredTimescale: 600)
+            guard let cgImg = try? gen.copyCGImage(at: time, actualTime: nil) else { return nil }
+            return UIImage(cgImage: cgImg)
+        }.value
+    }
+}
+
+struct VideoPlayerSheet: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        let player = AVPlayer(url: url)
+        controller.player = player
+        player.play()
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
+}
+
+struct FileBubbleCard: View {
+    let filename: String
+    let isGrid: Bool
+
+    private var fileExt: String {
+        let ext = (filename as NSString).pathExtension.uppercased()
+        return ext.isEmpty ? "FILE" : String(ext.prefix(5))
+    }
+
+    var body: some View {
+        if isGrid {
+            VStack(spacing: 10) {
+                ZStack(alignment: .bottom) {
+                    Image(systemName: "doc.fill")
+                        .font(.system(size: 46))
+                        .foregroundColor(Color(white: 0.88))
+                    Text(fileExt)
+                        .font(.system(size: 10, weight: .heavy))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color(red: 1.0, green: 0.165, blue: 0.23))
+                        .clipShape(Capsule())
+                        .offset(y: 6)
+                }
+            }
+        } else {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.white.opacity(0.14))
+                        .frame(width: 42, height: 48)
+                    VStack(spacing: 2) {
+                        Image(systemName: "doc.fill")
+                            .font(.system(size: 18))
+                            .foregroundColor(.white)
+                        Text(fileExt)
+                            .font(.system(size: 8, weight: .heavy))
+                            .foregroundColor(.white.opacity(0.9))
+                    }
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(filename)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(2)
+                    Text("Tap to Open / Save")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.7))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+        }
+    }
 }
