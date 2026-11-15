@@ -1,3 +1,4 @@
+import AudioToolbox
 import Photos
 import PhotosUI
 import SwiftUI
@@ -10,19 +11,27 @@ final class RorViewModel: ObservableObject {
     @Published var pairKey: String = RorConfigStore.pairKey
     @Published var pcName: String = RorConfigStore.pcName
     @Published var isPaired: Bool = RorConfigStore.isPaired
-    @Published var statusText: String = RorConfigStore.isPaired ? "Connected to \(RorConfigStore.pcName.isEmpty ? RorConfigStore.pcHost : RorConfigStore.pcName)" : "Scanning nearby devices..."
+    @Published var statusText: String = RorConfigStore.isPaired ? "Connected" : "Tap Set up a Device"
     @Published var isScanning: Bool = false
     @Published var isSyncing: Bool = false
     @Published var discoveredDevices: [RorDiscoveredDevice] = []
     @Published var textToSend: String = ""
     @Published var receivedItems: [RorReceivedEntry] = []
+    @Published var chatMessages: [RorChatMessage] = []
     @Published var showSettings: Bool = false
+    @Published var showSetupSheet: Bool = false
+    @Published var showChatSheet: Bool = false
     @Published var showManualEntry: Bool = false
+    @Published var playSounds: Bool = UserDefaults.standard.object(forKey: "ror_play_sounds") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(playSounds, forKey: "ror_play_sounds") }
+    }
 
     private let historyKey = "ror_received_history"
+    private let chatKey = "ror_chat_history"
 
     init() {
         loadHistory()
+        loadChat()
         if isPaired {
             syncFromPC()
         } else {
@@ -32,15 +41,15 @@ final class RorViewModel: ObservableObject {
 
     func scanNearby() {
         isScanning = true
-        statusText = "Searching nearby devices..."
+        statusText = "Searching nearby..."
         RorDiscovery.scan(timeoutSeconds: 2.0) { [weak self] devices in
             guard let self = self else { return }
             self.isScanning = false
             self.discoveredDevices = devices
             if devices.isEmpty {
-                self.statusText = "No nearby PCs found. Make sure ror is open on PC."
+                self.statusText = self.isPaired ? "Connected" : "No nearby PCs found"
             } else {
-                self.statusText = "Found \(devices.count) device(s) nearby"
+                self.statusText = "Found \(devices.count) device(s)"
             }
         }
     }
@@ -56,6 +65,7 @@ final class RorViewModel: ObservableObject {
         RorConfigStore.pairKey = device.pairKey
         RorConfigStore.pcName = device.deviceName
         isPaired = true
+        showSetupSheet = false
         showSettings = false
         statusText = "Connected to \(device.deviceName)"
         syncFromPC()
@@ -80,7 +90,7 @@ final class RorViewModel: ObservableObject {
             statusText = "Enter PC IP address"
             return
         }
-        statusText = "Connecting to PC..."
+        statusText = "Connecting..."
         RorNetwork.ping(baseURL: base) { [weak self] res in
             DispatchQueue.main.async {
                 switch res {
@@ -88,11 +98,12 @@ final class RorViewModel: ObservableObject {
                     RorConfigStore.pcName = name
                     self?.pcName = name
                     self?.isPaired = true
+                    self?.showSetupSheet = false
                     self?.showSettings = false
                     self?.statusText = "Connected to \(name)"
                     self?.syncFromPC()
                 case .failure(let err):
-                    self?.statusText = "Connection failed: \(err.localizedDescription)"
+                    self?.statusText = "Failed: \(err.localizedDescription)"
                 }
             }
         }
@@ -101,13 +112,14 @@ final class RorViewModel: ObservableObject {
     func sendText() {
         let trimmed = textToSend.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        statusText = "Sending text..."
+        textToSend = ""
+        appendChat(RorChatMessage(id: UUID().uuidString, isMe: true, text: trimmed, date: Date()))
+        statusText = "Sending..."
         RorNetwork.uploadText(trimmed) { [weak self] res in
             DispatchQueue.main.async {
                 switch res {
                 case .success:
-                    self?.textToSend = ""
-                    self?.statusText = "Text sent to \(self?.pcName.isEmpty == false ? self!.pcName : "PC")"
+                    self?.statusText = "Sent to \(self?.pcName.isEmpty == false ? self!.pcName : "Windows PC")"
                 case .failure(let err):
                     self?.statusText = "Send failed: \(err.localizedDescription)"
                 }
@@ -115,13 +127,43 @@ final class RorViewModel: ObservableObject {
         }
     }
 
-    func sendLocalFile(_ url: URL) {
+    func sendBatchFiles(_ files: [(url: URL, filename: String)]) {
+        guard !files.isEmpty else { return }
+        let batchId = UUID().uuidString
+        let total = files.count
+        statusText = total == 1 ? "Sending \(files[0].filename)..." : "Sending \(total) items..."
+
+        Task {
+            var okCount = 0
+            for (url, name) in files {
+                let success = await withCheckedContinuation { cont in
+                    RorNetwork.uploadFile(fileURL: url, filename: name, batchId: batchId, batchCount: total) { res in
+                        try? FileManager.default.removeItem(at: url)
+                        switch res {
+                        case .success: cont.resume(returning: true)
+                        case .failure: cont.resume(returning: false)
+                        }
+                    }
+                }
+                if success { okCount += 1 }
+            }
+            await MainActor.run {
+                if okCount == total {
+                    self.statusText = total == 1 ? "Sent \(files[0].filename)" : "Sent \(total) items to PC"
+                } else {
+                    self.statusText = "Sent \(okCount)/\(total) items"
+                }
+            }
+        }
+    }
+
+    func sendLocalFile(_ url: URL, batchId: String? = nil, batchCount: Int = 1) {
         statusText = "Sending \(url.lastPathComponent)..."
-        RorNetwork.uploadFile(fileURL: url, filename: url.lastPathComponent) { [weak self] res in
+        RorNetwork.uploadFile(fileURL: url, filename: url.lastPathComponent, batchId: batchId, batchCount: batchCount) { [weak self] res in
             DispatchQueue.main.async {
                 switch res {
                 case .success:
-                    self?.statusText = "Sent \(url.lastPathComponent) to \(self?.pcName.isEmpty == false ? self!.pcName : "PC")"
+                    self?.statusText = "Sent \(url.lastPathComponent)"
                 case .failure(let err):
                     self?.statusText = "Send failed: \(err.localizedDescription)"
                 }
@@ -130,8 +172,7 @@ final class RorViewModel: ObservableObject {
     }
 
     func syncFromPC() {
-        guard isPaired,
-              let base = RorConfigStore.baseURLString,
+        guard let base = RorConfigStore.baseURLString,
               let url = URL(string: "\(base)/queue"),
               !RorConfigStore.pairKey.isEmpty else { return }
 
@@ -158,11 +199,10 @@ final class RorViewModel: ObservableObject {
                 }
                 return
             }
-            let displayName = self.pcName.isEmpty ? self.pcHost : self.pcName
             if decoded.items.isEmpty {
                 DispatchQueue.main.async {
                     self.isSyncing = false
-                    self.statusText = "Connected to \(displayName)"
+                    self.statusText = "Synced"
                 }
                 return
             }
@@ -172,7 +212,10 @@ final class RorViewModel: ObservableObject {
                 }
                 await MainActor.run {
                     self.isSyncing = false
-                    self.statusText = "Received \(decoded.items.count) item(s) from \(displayName)"
+                    self.statusText = "Received \(decoded.items.count) item(s)"
+                    if self.playSounds {
+                        AudioServicesPlaySystemSound(1007)
+                    }
                 }
             }
         }.resume()
@@ -183,7 +226,8 @@ final class RorViewModel: ObservableObject {
             let txt = item.text ?? ""
             await MainActor.run {
                 UIPasteboard.general.string = txt
-                self.addHistory(RorReceivedEntry(id: item.id, type: "text", title: "Text Message (Copied)", detail: txt, localPath: nil, date: Date()))
+                self.appendChat(RorChatMessage(id: item.id, isMe: false, text: txt, date: Date()))
+                self.addHistory(RorReceivedEntry(id: item.id, type: "text", title: "Text Message", detail: txt, localPath: nil, date: Date()))
             }
             await ackItem(item.id, baseURL: baseURL)
             return
@@ -201,7 +245,7 @@ final class RorViewModel: ObservableObject {
             try? FileManager.default.removeItem(at: dest)
             try FileManager.default.moveItem(at: tempURL, to: dest)
 
-            var detail = "Saved in Files (ror)"
+            var detail = "Received from Windows PC"
             if item.type == "image" || item.type == "video" {
                 let savedToPhotos = await saveToPhotos(url: dest, isVideo: item.type == "video")
                 if savedToPhotos {
@@ -246,7 +290,7 @@ final class RorViewModel: ObservableObject {
 
     private func addHistory(_ entry: RorReceivedEntry) {
         receivedItems.insert(entry, at: 0)
-        if receivedItems.count > 50 { receivedItems = Array(receivedItems.prefix(50)) }
+        if receivedItems.count > 60 { receivedItems = Array(receivedItems.prefix(60)) }
         if let data = try? JSONEncoder().encode(receivedItems) {
             UserDefaults.standard.set(data, forKey: historyKey)
         }
@@ -258,311 +302,611 @@ final class RorViewModel: ObservableObject {
             receivedItems = items
         }
     }
+
+    private func appendChat(_ msg: RorChatMessage) {
+        chatMessages.append(msg)
+        if chatMessages.count > 100 { chatMessages = Array(chatMessages.suffix(100)) }
+        if let data = try? JSONEncoder().encode(chatMessages) {
+            UserDefaults.standard.set(data, forKey: chatKey)
+        }
+    }
+
+    private func loadChat() {
+        if let data = UserDefaults.standard.data(forKey: chatKey),
+           let items = try? JSONDecoder().decode([RorChatMessage].self, from: data) {
+            chatMessages = items
+        }
+    }
+
+    func clearHistory() {
+        receivedItems = []
+        UserDefaults.standard.removeObject(forKey: historyKey)
+    }
 }
 
 struct ContentView: View {
     @ObservedObject var vm: RorViewModel
-    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var searchText: String = ""
+    @State private var selectedPhotoItems: [PhotosPickerItem] = []
+    @State private var showPhotoPicker = false
     @State private var showFileImporter = false
+    @State private var showSendMenu = false
+    @State private var shareURL: URL?
 
     let accent = Color(red: 1.0, green: 0.165, blue: 0.23)
+
+    var filteredItems: [RorReceivedEntry] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if q.isEmpty { return vm.receivedItems }
+        return vm.receivedItems.filter {
+            $0.title.localizedCaseInsensitiveContains(q) || $0.detail.localizedCaseInsensitiveContains(q)
+        }
+    }
+
+    let columns = [
+        GridItem(.flexible(), spacing: 14),
+        GridItem(.flexible(), spacing: 14),
+    ]
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    // Top Bar: Gear | ror | Sync
+                    HStack {
+                        Button {
+                            vm.showSettings = true
+                        } label: {
+                            Image(systemName: "gearshape")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundColor(.white)
+                                .frame(width: 40, height: 40)
+                                .background(Color(white: 0.14))
+                                .clipShape(Circle())
+                        }
+
+                        Spacer()
+
+                        Text("ror")
+                            .font(.system(size: 19, weight: .bold))
+                            .foregroundColor(.white)
+
+                        Spacer()
+
+                        Button {
+                            if vm.isPaired { vm.syncFromPC() } else { vm.scanNearby() }
+                        } label: {
+                            Image(systemName: vm.isSyncing ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundColor(.white)
+                                .frame(width: 40, height: 40)
+                                .background(Color(white: 0.14))
+                                .clipShape(Circle())
+                        }
+                    }
+
+                    // Search Bar (Blip style)
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(Color(white: 0.55))
+                        TextField("Find Received Items", text: $searchText)
+                            .foregroundColor(.white)
+                            .font(.system(size: 15))
+                        if !searchText.isEmpty {
+                            Button { searchText = "" } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.gray)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(Color(white: 0.13))
+                    .clipShape(Capsule())
+
+                    // Device Circles Row (Blip style)
+                    HStack(alignment: .top, spacing: 18) {
+                        // Windows PC Circle (Tap to send)
+                        Button {
+                            if vm.isPaired {
+                                showSendMenu = true
+                            } else {
+                                vm.showSetupSheet = true
+                            }
+                        } label: {
+                            VStack(spacing: 8) {
+                                ZStack {
+                                    Circle()
+                                        .fill(vm.isPaired ? accent : Color(white: 0.15))
+                                        .frame(width: 68, height: 68)
+                                    Image(systemName: "desktopcomputer")
+                                        .font(.system(size: 27, weight: .medium))
+                                        .foregroundColor(.white)
+                                }
+                                Text(vm.pcName.isEmpty ? "Windows PC" : vm.pcName)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+
+                        // Multi-Photo Send Circle
+                        Button {
+                            if vm.isPaired {
+                                showPhotoPicker = true
+                            } else {
+                                vm.showSetupSheet = true
+                            }
+                        } label: {
+                            VStack(spacing: 8) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color(white: 0.15))
+                                        .frame(width: 68, height: 68)
+                                    Image(systemName: "photo.on.rectangle.angled")
+                                        .font(.system(size: 24, weight: .medium))
+                                        .foregroundColor(accent)
+                                }
+                                Text("Send\nPhotos")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.white)
+                                    .multilineTextAlignment(.center)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+
+                        // Chat Circle
+                        Button {
+                            vm.showChatSheet = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color(white: 0.15))
+                                        .frame(width: 68, height: 68)
+                                    Image(systemName: "bubble.left.and.bubble.right.fill")
+                                        .font(.system(size: 23, weight: .medium))
+                                        .foregroundColor(Color(red: 0.25, green: 0.65, blue: 1.0))
+                                }
+                                Text("Chat")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.white)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+
+                        // Set up Device Circle
+                        Button {
+                            vm.showSetupSheet = true
+                            vm.scanNearby()
+                        } label: {
+                            VStack(spacing: 8) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color(white: 0.15))
+                                        .frame(width: 68, height: 68)
+                                    Image(systemName: "laptopcomputer.and.iphone")
+                                        .font(.system(size: 23, weight: .medium))
+                                        .foregroundColor(Color(red: 0.25, green: 0.65, blue: 1.0))
+                                }
+                                Text("Set up\na Device")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.white)
+                                    .multilineTextAlignment(.center)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
+
+                    // Status Pill
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(vm.isPaired ? Color.green : Color.orange)
+                            .frame(width: 7, height: 7)
+                        Text(vm.statusText)
+                            .font(.caption)
+                            .foregroundColor(Color(white: 0.6))
+                    }
+
+                    // Received Section Header
+                    HStack {
+                        Text("Received")
+                            .font(.system(size: 26, weight: .bold))
+                            .foregroundColor(.white)
+                        Spacer()
+                        if !vm.receivedItems.isEmpty {
+                            Menu {
+                                Button("Clear History", role: .destructive) {
+                                    vm.clearHistory()
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                                    .font(.system(size: 18, weight: .bold))
+                                    .foregroundColor(Color(red: 0.25, green: 0.65, blue: 1.0))
+                                    .padding(8)
+                            }
+                        }
+                    }
+                    .padding(.top, 4)
+
+                    // Received 2-Column Grid (Blip style)
+                    if filteredItems.isEmpty {
+                        VStack(spacing: 10) {
+                            Image(systemName: "tray")
+                                .font(.system(size: 36))
+                                .foregroundColor(Color(white: 0.3))
+                            Text("Nothing received yet")
+                                .font(.subheadline)
+                                .foregroundColor(Color(white: 0.45))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 48)
+                    } else {
+                        LazyVGrid(columns: columns, spacing: 18) {
+                            ForEach(filteredItems) { item in
+                                Button {
+                                    if let p = item.localPath {
+                                        shareURL = URL(fileURLWithPath: p)
+                                    } else {
+                                        UIPasteboard.general.string = item.detail
+                                        vm.statusText = "Copied text"
+                                    }
+                                } label: {
+                                    ReceivedGridCard(item: item, accent: accent)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 10)
+                .padding(.bottom, 30)
+            }
+        }
+        .preferredColorScheme(.dark)
+        .confirmationDialog("Send to \(vm.pcName.isEmpty ? "Windows PC" : vm.pcName)", isPresented: $showSendMenu, titleVisibility: .visible) {
+            Button("Photos & Videos (Multi-select)") { showPhotoPicker = true }
+            Button("Files") { showFileImporter = true }
+            Button("Chat / Message") { vm.showChatSheet = true }
+            Button("Cancel", role: .cancel) {}
+        }
+        .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItems, maxSelectionCount: 0, matching: .any(of: [.images, .videos]))
+        .onChange(of: selectedPhotoItems) { items in
+            guard !items.isEmpty else { return }
+            let picked = items
+            selectedPhotoItems = []
+            Task {
+                var prepared: [(URL, String)] = []
+                for item in picked {
+                    if let data = try? await item.loadTransferable(type: Data.self) {
+                        let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
+                        let name = "ror_\(Int(Date().timeIntervalSince1970))_\(UUID().uuidString.prefix(4)).\(ext)"
+                        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+                        try? data.write(to: tmp)
+                        prepared.append((tmp, name))
+                    }
+                }
+                await MainActor.run {
+                    vm.sendBatchFiles(prepared)
+                }
+            }
+        }
+        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result {
+                let batchId = UUID().uuidString
+                for url in urls {
+                    let accessed = url.startAccessingSecurityScopedResource()
+                    vm.sendLocalFile(url, batchId: batchId, batchCount: urls.count)
+                    if accessed { url.stopAccessingSecurityScopedResource() }
+                }
+            }
+        }
+        .sheet(isPresented: $vm.showSettings) {
+            SettingsSheetView(vm: vm, accent: accent)
+        }
+        .sheet(isPresented: $vm.showSetupSheet) {
+            SetupDeviceSheetView(vm: vm, accent: accent)
+        }
+        .sheet(isPresented: $vm.showChatSheet) {
+            ChatSheetView(vm: vm, accent: accent)
+        }
+        .sheet(item: $shareURL) { url in
+            ShareSheet(activityItems: [url])
+        }
+    }
+}
+
+extension URL: @retroactive Identifiable {
+    public var id: String { absoluteString }
+}
+
+struct ReceivedGridCard: View {
+    let item: RorReceivedEntry
+    let accent: Color
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ZStack(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: 24)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(white: 0.34), Color(white: 0.16)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .aspectRatio(1, contentMode: .fit)
+                    .overlay(cardPreview.clipShape(RoundedRectangle(cornerRadius: 24)))
+                    .padding(.bottom, 14)
+
+                ZStack {
+                    Circle()
+                        .fill(accent)
+                        .frame(width: 34, height: 34)
+                        .overlay(Circle().stroke(Color.black, lineWidth: 2))
+                    Image(systemName: "desktopcomputer")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                }
+            }
+
+            Text(item.title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.white)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+
+            Text(item.detail)
+                .font(.system(size: 11))
+                .foregroundColor(Color(white: 0.5))
+                .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private var cardPreview: some View {
+        if item.type == "image", let path = item.localPath, let uiImg = UIImage(contentsOfFile: path) {
+            Image(uiImage: uiImg)
+                .resizable()
+                .scaledToFill()
+        } else if item.type == "text" {
+            VStack {
+                Image(systemName: "text.bubble.fill")
+                    .font(.system(size: 32))
+                    .foregroundColor(.white.opacity(0.8))
+                Text(item.detail)
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.7))
+                    .lineLimit(2)
+                    .padding(.horizontal, 10)
+            }
+        } else {
+            Image(systemName: item.type == "video" ? "video.fill" : "doc.fill")
+                .font(.system(size: 36))
+                .foregroundColor(.white.opacity(0.75))
+        }
+    }
+}
+
+struct ChatSheetView: View {
+    @ObservedObject var vm: RorViewModel
+    let accent: Color
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             ZStack {
-                Color(red: 0.04, green: 0.04, blue: 0.05).ignoresSafeArea()
-
-                ScrollView {
-                    VStack(spacing: 16) {
-                        // Header
-                        HStack(spacing: 12) {
-                            Text("R")
-                                .font(.system(size: 24, weight: .black))
-                                .foregroundColor(accent)
-                                .frame(width: 44, height: 44)
-                                .background(Color.black)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(accent.opacity(0.4), lineWidth: 1))
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("ror")
-                                    .font(.title2.bold())
-                                    .foregroundColor(.white)
-                                Text(vm.statusText)
-                                    .font(.caption)
-                                    .foregroundColor(.gray)
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                            Button {
-                                if vm.isPaired { vm.syncFromPC() } else { vm.scanNearby() }
-                            } label: {
-                                Image(systemName: "arrow.clockwise")
-                                    .foregroundColor(accent)
-                                    .padding(10)
-                                    .background(Color.white.opacity(0.06))
-                                    .clipShape(Circle())
-                            }
-                            Button {
-                                vm.showSettings.toggle()
-                            } label: {
-                                Image(systemName: "gearshape.fill")
-                                    .foregroundColor(.white)
-                                    .padding(10)
-                                    .background(Color.white.opacity(0.06))
-                                    .clipShape(Circle())
-                            }
-                        }
-
-                        // Settings Sheet Card (when gear tapped)
-                        if vm.showSettings {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("SETTINGS")
-                                    .font(.caption.bold())
-                                    .foregroundColor(accent)
-
-                                if vm.isPaired {
+                Color.black.ignoresSafeArea()
+                VStack(spacing: 0) {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(spacing: 10) {
+                                if vm.chatMessages.isEmpty {
+                                    Text("No messages yet. Say hi to your PC!")
+                                        .font(.subheadline)
+                                        .foregroundColor(.gray)
+                                        .padding(.top, 40)
+                                }
+                                ForEach(vm.chatMessages) { msg in
                                     HStack {
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(vm.pcName.isEmpty ? "Connected PC" : vm.pcName)
-                                                .font(.subheadline.bold())
-                                                .foregroundColor(.white)
-                                            Text("\(vm.pcHost):\(vm.pcPort)")
-                                                .font(.caption)
-                                                .foregroundColor(.gray)
-                                        }
-                                        Spacer()
-                                        Button("Disconnect") {
-                                            vm.disconnect()
-                                        }
-                                        .font(.caption.bold())
-                                        .padding(.horizontal, 14)
-                                        .padding(.vertical, 8)
-                                        .background(accent)
-                                        .foregroundColor(.white)
-                                        .clipShape(Capsule())
+                                        if msg.isMe { Spacer(minLength: 50) }
+                                        Text(msg.text)
+                                            .font(.system(size: 15))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 14)
+                                            .padding(.vertical, 10)
+                                            .background(msg.isMe ? accent : Color(white: 0.16))
+                                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                                        if !msg.isMe { Spacer(minLength: 50) }
                                     }
-                                    .padding(10)
-                                    .background(Color.black.opacity(0.4))
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    .id(msg.id)
                                 }
-
-                                DisclosureGroup("Manual / Tailscale IP", isExpanded: $vm.showManualEntry) {
-                                    VStack(spacing: 8) {
-                                        TextField("PC IP (Wi-Fi or Tailscale 100.x.x.x)", text: $vm.pcHost)
-                                            .textFieldStyle(.roundedBorder)
-                                            .autocapitalization(.none)
-                                            .keyboardType(.URL)
-                                        TextField("Port (58742)", text: $vm.pcPort)
-                                            .textFieldStyle(.roundedBorder)
-                                            .keyboardType(.numberPad)
-                                        TextField("Pair Key", text: $vm.pairKey)
-                                            .textFieldStyle(.roundedBorder)
-                                            .autocapitalization(.allCharacters)
-                                        Button("Save & Connect") {
-                                            vm.saveManualPairing()
-                                        }
-                                        .fontWeight(.bold)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 10)
-                                        .background(accent)
-                                        .foregroundColor(.white)
-                                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                                    }
-                                    .padding(.top, 8)
-                                }
-                                .tint(accent)
-                                .foregroundColor(.white)
                             }
                             .padding()
-                            .background(Color(red: 0.1, green: 0.1, blue: 0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: 16))
                         }
-
-                        // Nearby Devices Discovery Card (shown when NOT paired)
-                        if !vm.isPaired {
-                            VStack(alignment: .leading, spacing: 12) {
-                                HStack {
-                                    Text("NEARBY DEVICES")
-                                        .font(.caption.bold())
-                                        .foregroundColor(accent)
-                                    Spacer()
-                                    if vm.isScanning {
-                                        ProgressView().tint(accent)
-                                    } else {
-                                        Button("Scan Again") { vm.scanNearby() }
-                                            .font(.caption.bold())
-                                            .foregroundColor(accent)
-                                    }
-                                }
-
-                                if vm.discoveredDevices.isEmpty {
-                                    Text(vm.isScanning ? "Looking for ror on nearby PCs..." : "No nearby PCs found on this Wi-Fi. Open ror on your PC or tap Settings for manual/Tailscale IP.")
-                                        .font(.caption)
-                                        .foregroundColor(.gray)
-                                        .padding(.vertical, 8)
-                                } else {
-                                    ForEach(vm.discoveredDevices) { dev in
-                                        HStack(spacing: 12) {
-                                            Image(systemName: "desktopcomputer")
-                                                .font(.title2)
-                                                .foregroundColor(accent)
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text(dev.deviceName)
-                                                    .font(.subheadline.bold())
-                                                    .foregroundColor(.white)
-                                                Text(dev.host)
-                                                    .font(.caption)
-                                                    .foregroundColor(.gray)
-                                            }
-                                            Spacer()
-                                            Button("Connect") {
-                                                vm.connectToDevice(dev)
-                                            }
-                                            .font(.caption.bold())
-                                            .padding(.horizontal, 16)
-                                            .padding(.vertical, 8)
-                                            .background(accent)
-                                            .foregroundColor(.white)
-                                            .clipShape(Capsule())
-                                        }
-                                        .padding(12)
-                                        .background(Color.black.opacity(0.45))
-                                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                                    }
-                                }
+                        .onChange(of: vm.chatMessages.count) { _ in
+                            if let last = vm.chatMessages.last {
+                                withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                             }
-                            .padding()
-                            .background(Color(red: 0.1, green: 0.1, blue: 0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: 16))
-                        }
-
-                        // Send & Receive Cards (when paired)
-                        if vm.isPaired {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("SEND TO \(vm.pcName.isEmpty ? "PC" : vm.pcName.uppercased())")
-                                    .font(.caption.bold())
-                                    .foregroundColor(accent)
-
-                                HStack(spacing: 10) {
-                                    PhotosPicker(selection: $selectedPhotoItem, matching: .any(of: [.images, .videos])) {
-                                        Label("Photo / Video", systemImage: "photo.on.rectangle")
-                                            .font(.subheadline.bold())
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 12)
-                                            .background(accent)
-                                            .foregroundColor(.white)
-                                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                                    }
-
-                                    Button {
-                                        showFileImporter = true
-                                    } label: {
-                                        Label("File", systemImage: "doc")
-                                            .font(.subheadline.bold())
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 12)
-                                            .background(Color.white.opacity(0.1))
-                                            .foregroundColor(.white)
-                                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                                    }
-                                }
-
-                                HStack {
-                                    TextField("Send text or link to PC...", text: $vm.textToSend)
-                                        .padding(10)
-                                        .background(Color.black.opacity(0.5))
-                                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                                    Button {
-                                        vm.sendText()
-                                    } label: {
-                                        Image(systemName: "paperplane.fill")
-                                            .padding(10)
-                                            .background(accent)
-                                            .foregroundColor(.white)
-                                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                                    }
-                                }
-                            }
-                            .padding()
-                            .background(Color(red: 0.1, green: 0.1, blue: 0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: 16))
-
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("RECEIVED FROM PC")
-                                    .font(.caption.bold())
-                                    .foregroundColor(accent)
-
-                                if vm.receivedItems.isEmpty {
-                                    Text("No items received yet. Anything sent from your PC will appear here automatically.")
-                                        .font(.caption)
-                                        .foregroundColor(.gray)
-                                        .padding(.vertical, 12)
-                                } else {
-                                    ForEach(vm.receivedItems) { item in
-                                        HStack {
-                                            Image(systemName: item.type == "text" ? "text.alignleft" : (item.type == "video" ? "video.fill" : (item.type == "image" ? "photo.fill" : "doc.fill")))
-                                                .foregroundColor(accent)
-                                                .frame(width: 30)
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text(item.title)
-                                                    .font(.subheadline.bold())
-                                                    .foregroundColor(.white)
-                                                    .lineLimit(1)
-                                                Text(item.detail)
-                                                    .font(.caption)
-                                                    .foregroundColor(.gray)
-                                                    .lineLimit(2)
-                                            }
-                                            Spacer()
-                                            if item.type == "text" {
-                                                Button("Copy") {
-                                                    UIPasteboard.general.string = item.detail
-                                                    vm.statusText = "Copied to clipboard"
-                                                }
-                                                .font(.caption.bold())
-                                                .padding(.horizontal, 10)
-                                                .padding(.vertical, 6)
-                                                .background(Color.white.opacity(0.1))
-                                                .foregroundColor(.white)
-                                                .clipShape(Capsule())
-                                            }
-                                        }
-                                        .padding(10)
-                                        .background(Color.black.opacity(0.35))
-                                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                                    }
-                                }
-                            }
-                            .padding()
-                            .background(Color(red: 0.1, green: 0.1, blue: 0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: 16))
                         }
                     }
+
+                    HStack(spacing: 10) {
+                        TextField("Message PC...", text: $vm.textToSend)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(Color(white: 0.14))
+                            .foregroundColor(.white)
+                            .clipShape(Capsule())
+
+                        Button {
+                            vm.sendText()
+                        } label: {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 34))
+                                .foregroundColor(vm.textToSend.trimmingCharacters(in: .whitespaces).isEmpty ? .gray : accent)
+                        }
+                        .disabled(vm.textToSend.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
                     .padding()
+                    .background(Color(white: 0.07))
+                }
+            }
+            .navigationTitle("Chat")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { vm.syncFromPC() } label: { Image(systemName: "arrow.clockwise") }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
                 }
             }
         }
-        .onChange(of: selectedPhotoItem) { newItem in
-            guard let newItem else { return }
-            Task {
-                if let data = try? await newItem.loadTransferable(type: Data.self) {
-                    let ext = newItem.supportedContentTypes.first?.preferredFilenameExtension ?? "dat"
-                    let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("ror_\(Int(Date().timeIntervalSince1970)).\(ext)")
-                    try? data.write(to: tmp)
-                    vm.sendLocalFile(tmp)
-                }
-            }
-        }
-        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { res in
-            if case .success(let url) = res {
-                let accessed = url.startAccessingSecurityScopedResource()
-                let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
-                try? FileManager.default.removeItem(at: tmp)
-                try? FileManager.default.copyItem(at: url, to: tmp)
-                if accessed { url.stopAccessingSecurityScopedResource() }
-                vm.sendLocalFile(tmp)
-            }
-        }
+        .preferredColorScheme(.dark)
     }
+}
+
+struct SetupDeviceSheetView: View {
+    @ObservedObject var vm: RorViewModel
+    let accent: Color
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Nearby Devices") {
+                    if vm.isScanning {
+                        HStack {
+                            ProgressView().tint(accent)
+                            Text("Scanning Wi-Fi for ror on PC...").foregroundColor(.gray)
+                        }
+                    } else if vm.discoveredDevices.isEmpty {
+                        Text("No PCs found automatically. Make sure ror is open on PC on the same Wi-Fi.")
+                            .font(.subheadline)
+                            .foregroundColor(.gray)
+                    } else {
+                        ForEach(vm.discoveredDevices) { dev in
+                            Button {
+                                vm.connectToDevice(dev)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    ZStack {
+                                        Circle().fill(accent).frame(width: 36, height: 36)
+                                        Image(systemName: "desktopcomputer").foregroundColor(.white).font(.caption)
+                                    }
+                                    VStack(alignment: .leading) {
+                                        Text(dev.deviceName).foregroundColor(.white).font(.headline)
+                                        Text("\(dev.host):\(dev.port)").foregroundColor(.gray).font(.caption)
+                                    }
+                                    Spacer()
+                                    Text("Connect").foregroundColor(accent).font(.subheadline.bold())
+                                }
+                            }
+                        }
+                    }
+                    Button("Scan Again") { vm.scanNearby() }.foregroundColor(accent)
+                }
+
+                Section("Manual / Tailscale") {
+                    TextField("PC IP Address", text: $vm.pcHost)
+                        .keyboardType(.URL)
+                        .autocapitalization(.none)
+                    TextField("Port (58742)", text: $vm.pcPort)
+                        .keyboardType(.numberPad)
+                    TextField("Pair Key", text: $vm.pairKey)
+                        .autocapitalization(.allCharacters)
+                    Button("Save & Connect") { vm.saveManualPairing() }
+                        .foregroundColor(accent)
+                }
+            }
+            .navigationTitle("Set up a Device")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+struct SettingsSheetView: View {
+    @ObservedObject var vm: RorViewModel
+    let accent: Color
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Devices") {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle().fill(accent).frame(width: 34, height: 34)
+                            Image(systemName: "iphone").foregroundColor(.white).font(.caption)
+                        }
+                        VStack(alignment: .leading) {
+                            Text("iPhone").foregroundColor(.white)
+                            Text("This Phone").font(.caption).foregroundColor(.gray)
+                        }
+                    }
+
+                    if vm.isPaired {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle().fill(accent).frame(width: 34, height: 34)
+                                Image(systemName: "desktopcomputer").foregroundColor(.white).font(.caption)
+                            }
+                            VStack(alignment: .leading) {
+                                Text(vm.pcName.isEmpty ? "Windows PC" : vm.pcName).foregroundColor(.white)
+                                Text("Computer").font(.caption).foregroundColor(.gray)
+                            }
+                        }
+                    }
+
+                    Button("Set up Another Device") {
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            vm.showSetupSheet = true
+                            vm.scanNearby()
+                        }
+                    }
+                    .foregroundColor(.blue)
+                }
+
+                Section("Preferences") {
+                    Toggle("Play Sound Effects", isOn: $vm.playSounds)
+                        .tint(.green)
+                }
+
+                if vm.isPaired {
+                    Section {
+                        Button("Disconnect PC", role: .destructive) {
+                            vm.disconnect()
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

@@ -25,6 +25,13 @@ struct RorReceivedEntry: Codable, Identifiable {
     let date: Date
 }
 
+struct RorChatMessage: Codable, Identifiable {
+    let id: String
+    let isMe: Bool
+    let text: String
+    let date: Date
+}
+
 struct RorDiscoveredDevice: Identifiable, Hashable {
     var id: String { "\(host):\(port)" }
     let host: String
@@ -193,7 +200,7 @@ final class RorNetwork {
         }.resume()
     }
 
-    static func uploadFile(fileURL: URL, filename: String, completion: @escaping (Result<Void, Error>) -> Void) {
+    static func uploadFile(fileURL: URL, filename: String, batchId: String? = nil, batchCount: Int = 1, completion: @escaping (Result<Void, Error>) -> Void) {
         guard let base = RorConfigStore.baseURLString,
               let url = URL(string: "\(base)/upload") else {
             completion(.failure(NSError(domain: "ror", code: -1, userInfo: [NSLocalizedDescriptionKey: "PC not paired"])))
@@ -207,6 +214,10 @@ final class RorNetwork {
         req.setValue(UIDevice.current.name, forHTTPHeaderField: "X-Sender")
         let encodedName = filename.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? filename
         req.setValue(encodedName, forHTTPHeaderField: "X-Filename")
+        if let batchId = batchId, batchCount > 1 {
+            req.setValue(batchId, forHTTPHeaderField: "X-Batch-Id")
+            req.setValue(String(batchCount), forHTTPHeaderField: "X-Batch-Count")
+        }
 
         URLSession.shared.uploadTask(with: req, fromFile: fileURL) { _, resp, err in
             if let err = err {
