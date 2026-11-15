@@ -267,10 +267,7 @@ final class RorViewModel: ObservableObject {
                     self.statusText = "Received \(decoded.items.count) item(s)"
                     if UIApplication.shared.applicationState != .active {
                         Self.postLocalNotification(
-                            count: decoded.items.count,
-                            firstTitle: decoded.items.first?.type == "text"
-                                ? (decoded.items.first?.text ?? "New message")
-                                : (decoded.items.first?.filename ?? "New file"),
+                            body: Self.formatNotificationBody(for: decoded.items),
                             playSound: self.playSounds
                         )
                     } else if self.playSounds {
@@ -319,17 +316,40 @@ final class RorViewModel: ObservableObject {
         }
 
         let playSounds = UserDefaults.standard.object(forKey: "ror_play_sounds") as? Bool ?? true
-        let firstTitle = decoded.items.first?.type == "text"
-            ? (decoded.items.first?.text ?? "New message")
-            : (decoded.items.first?.filename ?? "New file")
-        postLocalNotification(count: decoded.items.count, firstTitle: firstTitle, playSound: playSounds)
+        postLocalNotification(body: formatNotificationBody(for: decoded.items), playSound: playSounds)
         return true
     }
 
-    static func postLocalNotification(count: Int, firstTitle: String, playSound: Bool) {
+    static func formatNotificationBody(for items: [RorQueueItem]) -> String {
+        let images = items.filter { $0.type == "image" }.count
+        let videos = items.filter { $0.type == "video" }.count
+        let texts = items.filter { $0.type == "text" }.count
+        let files = items.filter { $0.type != "image" && $0.type != "video" && $0.type != "text" }.count
+
+        var parts: [String] = []
+        if images > 0 { parts.append(images == 1 ? "1 photo" : "\(images) photos") }
+        if videos > 0 { parts.append(videos == 1 ? "1 video" : "\(videos) videos") }
+        if files > 0 {
+            if files == 1, let fn = items.first(where: { $0.type != "image" && $0.type != "video" && $0.type != "text" })?.filename {
+                parts.append(fn)
+            } else {
+                parts.append("\(files) files")
+            }
+        }
+        if texts > 0 {
+            if items.count == 1, let t = items.first?.text, !t.isEmpty {
+                parts.append(t)
+            } else {
+                parts.append(texts == 1 ? "1 message" : "\(texts) messages")
+            }
+        }
+        return parts.isEmpty ? "New item" : parts.joined(separator: ", ")
+    }
+
+    static func postLocalNotification(body: String, playSound: Bool) {
         let content = UNMutableNotificationContent()
         content.title = "Windows PC"
-        content.body = count == 1 ? firstTitle : "\(count) new items from Windows PC"
+        content.body = body
         if playSound {
             content.sound = UNNotificationSound(named: UNNotificationSoundName("notify.wav"))
         }
