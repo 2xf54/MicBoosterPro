@@ -44,8 +44,10 @@ struct RorApp: App {
                 .preferredColorScheme(.dark)
                 .onChange(of: scenePhase) { phase in
                     if phase == .active {
+                        vm.endBackgroundPolling()
                         vm.syncFromPC(silent: true)
                     } else if phase == .background {
+                        vm.startBackgroundPolling()
                         Self.scheduleBackgroundSync()
                     }
                 }

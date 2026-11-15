@@ -34,6 +34,8 @@ final class RorViewModel: ObservableObject {
     private let historyKey = "ror_received_history"
     private let chatKey = "ror_chat_history"
     private var audioPlayer: AVAudioPlayer?
+    private var bgTaskId: UIBackgroundTaskIdentifier = .invalid
+    private var bgTimer: Timer?
 
     init() {
         loadHistory()
@@ -277,6 +279,28 @@ final class RorViewModel: ObservableObject {
                 }
             }
         }.resume()
+    }
+
+    func startBackgroundPolling() {
+        guard isPaired, bgTaskId == .invalid else { return }
+        bgTaskId = UIApplication.shared.beginBackgroundTask(withName: "ror.bg.sync") { [weak self] in
+            self?.endBackgroundPolling()
+        }
+        bgTimer?.invalidate()
+        bgTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.syncFromPC(silent: true)
+            }
+        }
+    }
+
+    func endBackgroundPolling() {
+        bgTimer?.invalidate()
+        bgTimer = nil
+        if bgTaskId != .invalid {
+            UIApplication.shared.endBackgroundTask(bgTaskId)
+            bgTaskId = .invalid
+        }
     }
 
     static func performBackgroundSync() async -> Bool {
@@ -811,7 +835,7 @@ struct ContentView: View {
         .sheet(item: $shareURL) { url in
             ShareSheet(activityItems: [url])
         }
-        .fullScreenCover(item: $videoPlayerURL) { url in
+        .sheet(item: $videoPlayerURL) { url in
             VideoPlayerSheet(url: url)
         }
         .quickLookPreview($quickLookURL)
@@ -933,16 +957,14 @@ struct ReceivedGridCard: View {
     var body: some View {
         VStack(spacing: 8) {
             ZStack(alignment: .bottom) {
-                RoundedRectangle(cornerRadius: 24)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(white: 0.34), Color(white: 0.16)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
+                Color(white: 0.16)
                     .aspectRatio(1, contentMode: .fit)
-                    .overlay(cardPreview.clipShape(RoundedRectangle(cornerRadius: 24)))
+                    .overlay(
+                        cardPreview
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .padding(.bottom, 14)
 
                 ZStack {
@@ -1086,10 +1108,19 @@ struct ChatSheetView: View {
                         }
                     }
 
-                    // Bottom Chat Input with + Attach button on the left
+                    // Bottom Chat Input with + Attach Menu on the left
                     HStack(spacing: 10) {
-                        Button {
-                            showAttachMenu = true
+                        Menu {
+                            Button {
+                                showChatPhotos = true
+                            } label: {
+                                Label("Photos & Videos", systemImage: "photo.on.rectangle.angled")
+                            }
+                            Button {
+                                showChatFiles = true
+                            } label: {
+                                Label("Files", systemImage: "folder")
+                            }
                         } label: {
                             Image(systemName: "plus")
                                 .font(.system(size: 18, weight: .bold))
@@ -1141,11 +1172,6 @@ struct ChatSheetView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .confirmationDialog("Attach to Chat", isPresented: $showAttachMenu) {
-                Button("Photos & Videos") { showChatPhotos = true }
-                Button("Files") { showChatFiles = true }
-                Button("Cancel", role: .cancel) {}
-            }
             .photosPicker(isPresented: $showChatPhotos, selection: $chatPhotoItems, maxSelectionCount: 0, matching: .any(of: [.images, .videos]))
             .onChange(of: chatPhotoItems) { items in
                 guard !items.isEmpty else { return }
@@ -1184,7 +1210,7 @@ struct ChatSheetView: View {
             .sheet(item: $shareFileURL) { url in
                 ShareSheet(activityItems: [url])
             }
-            .fullScreenCover(item: $videoPlayerURL) { url in
+            .sheet(item: $videoPlayerURL) { url in
                 VideoPlayerSheet(url: url)
             }
         }
@@ -1198,27 +1224,29 @@ struct ChatSheetView: View {
                 Image(uiImage: img)
                     .resizable()
                     .scaledToFill()
-                    .frame(maxWidth: 210, maxHeight: 210)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .frame(width: 210, height: 185)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 Text("Hold to Save")
                     .font(.caption2)
                     .foregroundColor(.white.opacity(0.6))
             }
             .padding(6)
             .background(msg.isMe ? accent : Color(white: 0.16))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         } else if let path = msg.localPath, msg.mediaType == "video" {
             VStack(alignment: .leading, spacing: 4) {
                 VideoThumbnailView(url: URL(fileURLWithPath: path))
                     .frame(width: 210, height: 150)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 Text("Tap to Play • Hold to Save")
                     .font(.caption2)
                     .foregroundColor(.white.opacity(0.65))
             }
             .padding(6)
             .background(msg.isMe ? accent : Color(white: 0.16))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         } else if msg.mediaType != nil {
             FileBubbleCard(filename: msg.text, isGrid: false)
                 .background(msg.isMe ? accent : Color(white: 0.16))
@@ -1241,6 +1269,9 @@ struct ChatSheetView: View {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if t.hasPrefix("<") && t.hasSuffix(">") && t.contains("://") {
             return String(t.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if t.hasPrefix("["), let closeBracket = t.firstIndex(of: "]"), t.contains("://") {
+            return String(t[t.index(after: t.startIndex)..<closeBracket])
         }
         return text
     }
@@ -1475,7 +1506,34 @@ struct VideoThumbnailView: View {
     }
 }
 
-struct VideoPlayerSheet: UIViewControllerRepresentable {
+struct VideoPlayerSheet: View {
+    let url: URL
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+            AVPlayerRepresentable(url: url)
+                .ignoresSafeArea()
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 38, height: 38)
+                    .background(Color.black.opacity(0.65))
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
+            }
+            .padding(.top, 16)
+            .padding(.trailing, 16)
+        }
+    }
+}
+
+struct AVPlayerRepresentable: UIViewControllerRepresentable {
     let url: URL
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
@@ -1487,6 +1545,10 @@ struct VideoPlayerSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
+
+    static func dismantleUIViewController(_ uiViewController: AVPlayerViewController, coordinator: ()) {
+        uiViewController.player?.pause()
+    }
 }
 
 struct FileBubbleCard: View {
