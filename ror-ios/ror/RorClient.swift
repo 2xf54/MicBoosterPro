@@ -31,7 +31,7 @@ final class RorConfigStore {
     private static let pairKeyKey = "ror_pair_key"
 
     static var defaults: UserDefaults {
-        UserDefaults(suiteName: appGroup) ?? .standard
+        UserDefaults.standard
     }
 
     static var pcHost: String {
