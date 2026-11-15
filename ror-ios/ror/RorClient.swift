@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Photos
 import UIKit
@@ -24,38 +25,50 @@ struct RorReceivedEntry: Codable, Identifiable {
     let date: Date
 }
 
+struct RorDiscoveredDevice: Identifiable, Hashable {
+    var id: String { "\(host):\(port)" }
+    let host: String
+    let port: Int
+    let deviceName: String
+    let pairKey: String
+}
+
 final class RorConfigStore {
-    static let appGroup = "group.com.ghazi.ror"
     private static let hostKey = "ror_pc_host"
     private static let portKey = "ror_pc_port"
     private static let pairKeyKey = "ror_pair_key"
-
-    static var defaults: UserDefaults {
-        UserDefaults.standard
-    }
+    private static let nameKey = "ror_pc_name"
 
     static var pcHost: String {
-        get { defaults.string(forKey: hostKey) ?? UserDefaults.standard.string(forKey: hostKey) ?? "" }
-        set {
-            defaults.set(newValue, forKey: hostKey)
-            UserDefaults.standard.set(newValue, forKey: hostKey)
-        }
+        get { UserDefaults.standard.string(forKey: hostKey) ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: hostKey) }
     }
 
     static var pcPort: String {
-        get { defaults.string(forKey: portKey) ?? UserDefaults.standard.string(forKey: portKey) ?? "58742" }
-        set {
-            defaults.set(newValue, forKey: portKey)
-            UserDefaults.standard.set(newValue, forKey: portKey)
-        }
+        get { UserDefaults.standard.string(forKey: portKey) ?? "58742" }
+        set { UserDefaults.standard.set(newValue, forKey: portKey) }
     }
 
     static var pairKey: String {
-        get { defaults.string(forKey: pairKeyKey) ?? UserDefaults.standard.string(forKey: pairKeyKey) ?? "" }
-        set {
-            defaults.set(newValue, forKey: pairKeyKey)
-            UserDefaults.standard.set(newValue, forKey: pairKeyKey)
-        }
+        get { UserDefaults.standard.string(forKey: pairKeyKey) ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: pairKeyKey) }
+    }
+
+    static var pcName: String {
+        get { UserDefaults.standard.string(forKey: nameKey) ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: nameKey) }
+    }
+
+    static var isPaired: Bool {
+        !pcHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !pairKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    static func disconnect() {
+        UserDefaults.standard.removeObject(forKey: hostKey)
+        UserDefaults.standard.removeObject(forKey: portKey)
+        UserDefaults.standard.removeObject(forKey: pairKeyKey)
+        UserDefaults.standard.removeObject(forKey: nameKey)
     }
 
     static var baseURLString: String? {
@@ -66,6 +79,94 @@ final class RorConfigStore {
             return host
         }
         return "http://\(host):\(port.isEmpty ? "58742" : port)"
+    }
+}
+
+final class RorDiscovery {
+    static func scan(timeoutSeconds: Double = 2.0, completion: @escaping ([RorDiscoveredDevice]) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            var found: [String: RorDiscoveredDevice] = [:]
+            let sock = Darwin.socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+            if sock < 0 {
+                DispatchQueue.main.async { completion([]) }
+                return
+            }
+            defer { Darwin.close(sock) }
+
+            var yes: Int32 = 1
+            setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &yes, socklen_t(MemoryLayout<Int32>.size))
+
+            var tv = timeval(tv_sec: 0, tv_usec: 400_000)
+            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+
+            var targets: [sockaddr_in] = []
+            var bcast = sockaddr_in()
+            bcast.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            bcast.sin_family = sa_family_t(AF_INET)
+            bcast.sin_port = UInt16(58743).bigEndian
+            bcast.sin_addr.s_addr = inet_addr("255.255.255.255")
+            targets.append(bcast)
+
+            // Also send to active Wi-Fi interface broadcast address
+            var ifaddr: UnsafeMutablePointer<ifaddrs>?
+            if getifaddrs(&ifaddr) == 0, let first = ifaddr {
+                var ptr: UnsafeMutablePointer<ifaddrs>? = first
+                while let cur = ptr {
+                    if cur.pointee.ifa_addr?.pointee.sa_family == UInt8(AF_INET),
+                       let dst = cur.pointee.ifa_dstaddr,
+                       dst.pointee.sa_family == UInt8(AF_INET) {
+                        var sin = dst.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
+                        sin.sin_port = UInt16(58743).bigEndian
+                        targets.append(sin)
+                    }
+                    ptr = cur.pointee.ifa_next
+                }
+                freeifaddrs(first)
+            }
+
+            let msg = Array("ROR_DISCOVER".utf8)
+            for var addr in targets {
+                _ = msg.withUnsafeBytes { buf in
+                    withUnsafePointer(to: &addr) { ptr in
+                        ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                            Darwin.sendto(sock, buf.baseAddress, buf.count, 0, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+                        }
+                    }
+                }
+            }
+
+            let deadline = Date().addingTimeInterval(timeoutSeconds)
+            var recvBuf = [UInt8](repeating: 0, count: 2048)
+            while Date() < deadline {
+                var srcAddr = sockaddr_in()
+                var srcLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+                let n = withUnsafeMutablePointer(to: &srcAddr) { ptr in
+                    ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                        Darwin.recvfrom(sock, &recvBuf, recvBuf.count, 0, sa, &srcLen)
+                    }
+                }
+                if n > 0 {
+                    let data = Data(recvBuf.prefix(n))
+                    if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       (obj["app"] as? String) == "ror",
+                       let devName = obj["device"] as? String,
+                       let port = obj["port"] as? Int,
+                       let key = obj["pair_key"] as? String {
+                        var ipC = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+                        var inAddr = srcAddr.sin_addr
+                        inet_ntop(AF_INET, &inAddr, &ipC, socklen_t(INET_ADDRSTRLEN))
+                        let ip = String(cString: ipC)
+                        let dev = RorDiscoveredDevice(host: ip, port: port, deviceName: devName, pairKey: key)
+                        found[dev.id] = dev
+                    }
+                }
+            }
+
+            let list = found.values.sorted { $0.deviceName < $1.deviceName }
+            DispatchQueue.main.async {
+                completion(list)
+            }
+        }
     }
 }
 

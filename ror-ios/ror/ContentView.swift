@@ -8,20 +8,71 @@ final class RorViewModel: ObservableObject {
     @Published var pcHost: String = RorConfigStore.pcHost
     @Published var pcPort: String = RorConfigStore.pcPort
     @Published var pairKey: String = RorConfigStore.pairKey
-    @Published var statusText: String = "Ready"
+    @Published var pcName: String = RorConfigStore.pcName
+    @Published var isPaired: Bool = RorConfigStore.isPaired
+    @Published var statusText: String = RorConfigStore.isPaired ? "Connected to \(RorConfigStore.pcName.isEmpty ? RorConfigStore.pcHost : RorConfigStore.pcName)" : "Scanning nearby devices..."
+    @Published var isScanning: Bool = false
     @Published var isSyncing: Bool = false
+    @Published var discoveredDevices: [RorDiscoveredDevice] = []
     @Published var textToSend: String = ""
     @Published var receivedItems: [RorReceivedEntry] = []
-    @Published var showSettings: Bool = RorConfigStore.pcHost.isEmpty
+    @Published var showSettings: Bool = false
+    @Published var showManualEntry: Bool = false
 
     private let historyKey = "ror_received_history"
 
     init() {
         loadHistory()
+        if isPaired {
+            syncFromPC()
+        } else {
+            scanNearby()
+        }
+    }
+
+    func scanNearby() {
+        isScanning = true
+        statusText = "Searching nearby devices..."
+        RorDiscovery.scan(timeoutSeconds: 2.0) { [weak self] devices in
+            guard let self = self else { return }
+            self.isScanning = false
+            self.discoveredDevices = devices
+            if devices.isEmpty {
+                self.statusText = "No nearby PCs found. Make sure ror is open on PC."
+            } else {
+                self.statusText = "Found \(devices.count) device(s) nearby"
+            }
+        }
+    }
+
+    func connectToDevice(_ device: RorDiscoveredDevice) {
+        pcHost = device.host
+        pcPort = String(device.port)
+        pairKey = device.pairKey
+        pcName = device.deviceName
+
+        RorConfigStore.pcHost = device.host
+        RorConfigStore.pcPort = String(device.port)
+        RorConfigStore.pairKey = device.pairKey
+        RorConfigStore.pcName = device.deviceName
+        isPaired = true
+        showSettings = false
+        statusText = "Connected to \(device.deviceName)"
         syncFromPC()
     }
 
-    func savePairing() {
+    func disconnect() {
+        RorConfigStore.disconnect()
+        pcHost = ""
+        pcPort = "58742"
+        pairKey = ""
+        pcName = ""
+        isPaired = false
+        showSettings = false
+        scanNearby()
+    }
+
+    func saveManualPairing() {
         RorConfigStore.pcHost = pcHost
         RorConfigStore.pcPort = pcPort
         RorConfigStore.pairKey = pairKey
@@ -34,8 +85,11 @@ final class RorViewModel: ObservableObject {
             DispatchQueue.main.async {
                 switch res {
                 case .success(let name):
-                    self?.statusText = "Connected to \(name)"
+                    RorConfigStore.pcName = name
+                    self?.pcName = name
+                    self?.isPaired = true
                     self?.showSettings = false
+                    self?.statusText = "Connected to \(name)"
                     self?.syncFromPC()
                 case .failure(let err):
                     self?.statusText = "Connection failed: \(err.localizedDescription)"
@@ -53,7 +107,7 @@ final class RorViewModel: ObservableObject {
                 switch res {
                 case .success:
                     self?.textToSend = ""
-                    self?.statusText = "Text sent to PC"
+                    self?.statusText = "Text sent to \(self?.pcName.isEmpty == false ? self!.pcName : "PC")"
                 case .failure(let err):
                     self?.statusText = "Send failed: \(err.localizedDescription)"
                 }
@@ -67,7 +121,7 @@ final class RorViewModel: ObservableObject {
             DispatchQueue.main.async {
                 switch res {
                 case .success:
-                    self?.statusText = "Sent \(url.lastPathComponent) to PC"
+                    self?.statusText = "Sent \(url.lastPathComponent) to \(self?.pcName.isEmpty == false ? self!.pcName : "PC")"
                 case .failure(let err):
                     self?.statusText = "Send failed: \(err.localizedDescription)"
                 }
@@ -76,7 +130,8 @@ final class RorViewModel: ObservableObject {
     }
 
     func syncFromPC() {
-        guard let base = RorConfigStore.baseURLString,
+        guard isPaired,
+              let base = RorConfigStore.baseURLString,
               let url = URL(string: "\(base)/queue"),
               !RorConfigStore.pairKey.isEmpty else { return }
 
@@ -103,10 +158,11 @@ final class RorViewModel: ObservableObject {
                 }
                 return
             }
+            let displayName = self.pcName.isEmpty ? self.pcHost : self.pcName
             if decoded.items.isEmpty {
                 DispatchQueue.main.async {
                     self.isSyncing = false
-                    self.statusText = "Synced • Up to date"
+                    self.statusText = "Connected to \(displayName)"
                 }
                 return
             }
@@ -116,7 +172,7 @@ final class RorViewModel: ObservableObject {
                 }
                 await MainActor.run {
                     self.isSyncing = false
-                    self.statusText = "Received \(decoded.items.count) item(s)"
+                    self.statusText = "Received \(decoded.items.count) item(s) from \(displayName)"
                 }
             }
         }.resume()
@@ -235,10 +291,11 @@ struct ContentView: View {
                                 Text(vm.statusText)
                                     .font(.caption)
                                     .foregroundColor(.gray)
+                                    .lineLimit(1)
                             }
                             Spacer()
                             Button {
-                                vm.syncFromPC()
+                                if vm.isPaired { vm.syncFromPC() } else { vm.scanNearby() }
                             } label: {
                                 Image(systemName: "arrow.clockwise")
                                     .foregroundColor(accent)
@@ -257,31 +314,122 @@ struct ContentView: View {
                             }
                         }
 
+                        // Settings Sheet Card (when gear tapped)
                         if vm.showSettings {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("PC PAIRING")
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("SETTINGS")
                                     .font(.caption.bold())
                                     .foregroundColor(accent)
-                                TextField("PC IP (Wi-Fi or Tailscale 100.x.x.x)", text: $vm.pcHost)
-                                    .textFieldStyle(.roundedBorder)
-                                    .autocapitalization(.none)
-                                    .keyboardType(.URL)
-                                TextField("Port (58742)", text: $vm.pcPort)
-                                    .textFieldStyle(.roundedBorder)
-                                    .keyboardType(.numberPad)
-                                TextField("Pair Key", text: $vm.pairKey)
-                                    .textFieldStyle(.roundedBorder)
-                                    .autocapitalization(.allCharacters)
-                                Button {
-                                    vm.savePairing()
-                                } label: {
-                                    Text("Save & Connect")
+
+                                if vm.isPaired {
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(vm.pcName.isEmpty ? "Connected PC" : vm.pcName)
+                                                .font(.subheadline.bold())
+                                                .foregroundColor(.white)
+                                            Text("\(vm.pcHost):\(vm.pcPort)")
+                                                .font(.caption)
+                                                .foregroundColor(.gray)
+                                        }
+                                        Spacer()
+                                        Button("Disconnect") {
+                                            vm.disconnect()
+                                        }
+                                        .font(.caption.bold())
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 8)
+                                        .background(accent)
+                                        .foregroundColor(.white)
+                                        .clipShape(Capsule())
+                                    }
+                                    .padding(10)
+                                    .background(Color.black.opacity(0.4))
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                }
+
+                                DisclosureGroup("Manual / Tailscale IP", isExpanded: $vm.showManualEntry) {
+                                    VStack(spacing: 8) {
+                                        TextField("PC IP (Wi-Fi or Tailscale 100.x.x.x)", text: $vm.pcHost)
+                                            .textFieldStyle(.roundedBorder)
+                                            .autocapitalization(.none)
+                                            .keyboardType(.URL)
+                                        TextField("Port (58742)", text: $vm.pcPort)
+                                            .textFieldStyle(.roundedBorder)
+                                            .keyboardType(.numberPad)
+                                        TextField("Pair Key", text: $vm.pairKey)
+                                            .textFieldStyle(.roundedBorder)
+                                            .autocapitalization(.allCharacters)
+                                        Button("Save & Connect") {
+                                            vm.saveManualPairing()
+                                        }
                                         .fontWeight(.bold)
                                         .frame(maxWidth: .infinity)
                                         .padding(.vertical, 10)
                                         .background(accent)
                                         .foregroundColor(.white)
                                         .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    }
+                                    .padding(.top, 8)
+                                }
+                                .tint(accent)
+                                .foregroundColor(.white)
+                            }
+                            .padding()
+                            .background(Color(red: 0.1, green: 0.1, blue: 0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                        }
+
+                        // Nearby Devices Discovery Card (shown when NOT paired)
+                        if !vm.isPaired {
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack {
+                                    Text("NEARBY DEVICES")
+                                        .font(.caption.bold())
+                                        .foregroundColor(accent)
+                                    Spacer()
+                                    if vm.isScanning {
+                                        ProgressView().tint(accent)
+                                    } else {
+                                        Button("Scan Again") { vm.scanNearby() }
+                                            .font(.caption.bold())
+                                            .foregroundColor(accent)
+                                    }
+                                }
+
+                                if vm.discoveredDevices.isEmpty {
+                                    Text(vm.isScanning ? "Looking for ror on nearby PCs..." : "No nearby PCs found on this Wi-Fi. Open ror on your PC or tap Settings for manual/Tailscale IP.")
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                        .padding(.vertical, 8)
+                                } else {
+                                    ForEach(vm.discoveredDevices) { dev in
+                                        HStack(spacing: 12) {
+                                            Image(systemName: "desktopcomputer")
+                                                .font(.title2)
+                                                .foregroundColor(accent)
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(dev.deviceName)
+                                                    .font(.subheadline.bold())
+                                                    .foregroundColor(.white)
+                                                Text(dev.host)
+                                                    .font(.caption)
+                                                    .foregroundColor(.gray)
+                                            }
+                                            Spacer()
+                                            Button("Connect") {
+                                                vm.connectToDevice(dev)
+                                            }
+                                            .font(.caption.bold())
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 8)
+                                            .background(accent)
+                                            .foregroundColor(.white)
+                                            .clipShape(Capsule())
+                                        }
+                                        .padding(12)
+                                        .background(Color.black.opacity(0.45))
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    }
                                 }
                             }
                             .padding()
@@ -289,106 +437,107 @@ struct ContentView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 16))
                         }
 
-                        // Send to PC Card
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("SEND TO PC")
-                                .font(.caption.bold())
-                                .foregroundColor(accent)
+                        // Send & Receive Cards (when paired)
+                        if vm.isPaired {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("SEND TO \(vm.pcName.isEmpty ? "PC" : vm.pcName.uppercased())")
+                                    .font(.caption.bold())
+                                    .foregroundColor(accent)
 
-                            HStack(spacing: 10) {
-                                PhotosPicker(selection: $selectedPhotoItem, matching: .any(of: [.images, .videos])) {
-                                    Label("Photo / Video", systemImage: "photo.on.rectangle")
-                                        .font(.subheadline.bold())
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 12)
-                                        .background(accent)
-                                        .foregroundColor(.white)
-                                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                                }
+                                HStack(spacing: 10) {
+                                    PhotosPicker(selection: $selectedPhotoItem, matching: .any(of: [.images, .videos])) {
+                                        Label("Photo / Video", systemImage: "photo.on.rectangle")
+                                            .font(.subheadline.bold())
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 12)
+                                            .background(accent)
+                                            .foregroundColor(.white)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    }
 
-                                Button {
-                                    showFileImporter = true
-                                } label: {
-                                    Label("File", systemImage: "doc")
-                                        .font(.subheadline.bold())
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 12)
-                                        .background(Color.white.opacity(0.1))
-                                        .foregroundColor(.white)
-                                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                                }
-                            }
-
-                            HStack {
-                                TextField("Send text or link to PC...", text: $vm.textToSend)
-                                    .padding(10)
-                                    .background(Color.black.opacity(0.5))
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                                Button {
-                                    vm.sendText()
-                                } label: {
-                                    Image(systemName: "paperplane.fill")
-                                        .padding(10)
-                                        .background(accent)
-                                        .foregroundColor(.white)
-                                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                                }
-                            }
-                        }
-                        .padding()
-                        .background(Color(red: 0.1, green: 0.1, blue: 0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-
-                        // Received from PC List
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("RECEIVED FROM PC")
-                                .font(.caption.bold())
-                                .foregroundColor(accent)
-
-                            if vm.receivedItems.isEmpty {
-                                Text("No items received yet. Anything sent from your PC will appear here automatically.")
-                                    .font(.caption)
-                                    .foregroundColor(.gray)
-                                    .padding(.vertical, 12)
-                            } else {
-                                ForEach(vm.receivedItems) { item in
-                                    HStack {
-                                        Image(systemName: item.type == "text" ? "text.alignleft" : (item.type == "video" ? "video.fill" : (item.type == "image" ? "photo.fill" : "doc.fill")))
-                                            .foregroundColor(accent)
-                                            .frame(width: 30)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(item.title)
-                                                .font(.subheadline.bold())
-                                                .foregroundColor(.white)
-                                                .lineLimit(1)
-                                            Text(item.detail)
-                                                .font(.caption)
-                                                .foregroundColor(.gray)
-                                                .lineLimit(2)
-                                        }
-                                        Spacer()
-                                        if item.type == "text" {
-                                            Button("Copy") {
-                                                UIPasteboard.general.string = item.detail
-                                                vm.statusText = "Copied to clipboard"
-                                            }
-                                            .font(.caption.bold())
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 6)
+                                    Button {
+                                        showFileImporter = true
+                                    } label: {
+                                        Label("File", systemImage: "doc")
+                                            .font(.subheadline.bold())
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 12)
                                             .background(Color.white.opacity(0.1))
                                             .foregroundColor(.white)
-                                            .clipShape(Capsule())
-                                        }
+                                            .clipShape(RoundedRectangle(cornerRadius: 12))
                                     }
-                                    .padding(10)
-                                    .background(Color.black.opacity(0.35))
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                }
+
+                                HStack {
+                                    TextField("Send text or link to PC...", text: $vm.textToSend)
+                                        .padding(10)
+                                        .background(Color.black.opacity(0.5))
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    Button {
+                                        vm.sendText()
+                                    } label: {
+                                        Image(systemName: "paperplane.fill")
+                                            .padding(10)
+                                            .background(accent)
+                                            .foregroundColor(.white)
+                                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    }
                                 }
                             }
+                            .padding()
+                            .background(Color(red: 0.1, green: 0.1, blue: 0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("RECEIVED FROM PC")
+                                    .font(.caption.bold())
+                                    .foregroundColor(accent)
+
+                                if vm.receivedItems.isEmpty {
+                                    Text("No items received yet. Anything sent from your PC will appear here automatically.")
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                        .padding(.vertical, 12)
+                                } else {
+                                    ForEach(vm.receivedItems) { item in
+                                        HStack {
+                                            Image(systemName: item.type == "text" ? "text.alignleft" : (item.type == "video" ? "video.fill" : (item.type == "image" ? "photo.fill" : "doc.fill")))
+                                                .foregroundColor(accent)
+                                                .frame(width: 30)
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(item.title)
+                                                    .font(.subheadline.bold())
+                                                    .foregroundColor(.white)
+                                                    .lineLimit(1)
+                                                Text(item.detail)
+                                                    .font(.caption)
+                                                    .foregroundColor(.gray)
+                                                    .lineLimit(2)
+                                            }
+                                            Spacer()
+                                            if item.type == "text" {
+                                                Button("Copy") {
+                                                    UIPasteboard.general.string = item.detail
+                                                    vm.statusText = "Copied to clipboard"
+                                                }
+                                                .font(.caption.bold())
+                                                .padding(.horizontal, 10)
+                                                .padding(.vertical, 6)
+                                                .background(Color.white.opacity(0.1))
+                                                .foregroundColor(.white)
+                                                .clipShape(Capsule())
+                                            }
+                                        }
+                                        .padding(10)
+                                        .background(Color.black.opacity(0.35))
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    }
+                                }
+                            }
+                            .padding()
+                            .background(Color(red: 0.1, green: 0.1, blue: 0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
                         }
-                        .padding()
-                        .background(Color(red: 0.1, green: 0.1, blue: 0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
                     }
                     .padding()
                 }

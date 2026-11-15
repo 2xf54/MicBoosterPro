@@ -14,8 +14,8 @@ targets:
       path: ror/Info.plist
       properties:
         CFBundleDisplayName: "ror"
-        CFBundleShortVersionString: "1.1"
-        CFBundleVersion: "2"
+        CFBundleShortVersionString: "1.2"
+        CFBundleVersion: "3"
         LSRequiresIPhoneOS: true
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
