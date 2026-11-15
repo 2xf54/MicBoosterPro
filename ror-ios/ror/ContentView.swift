@@ -894,13 +894,24 @@ struct ChatSheetView: View {
                                         chatBubble(msg)
                                             .onTapGesture {
                                                 if msg.mediaType == nil {
-                                                    UIPasteboard.general.string = msg.text
-                                                    showToast("Copy ✓")
+                                                    if let url = detectURL(in: msg.text) {
+                                                        UIApplication.shared.open(url)
+                                                    } else {
+                                                        UIPasteboard.general.string = msg.text
+                                                        showToast("Copy ✓")
+                                                    }
                                                 } else if let p = msg.localPath {
                                                     shareFileURL = URL(fileURLWithPath: p)
                                                 }
                                             }
                                             .contextMenu {
+                                                if msg.mediaType == nil, let url = detectURL(in: msg.text) {
+                                                    Button {
+                                                        UIApplication.shared.open(url)
+                                                    } label: {
+                                                        Label("Open in Safari", systemImage: "safari")
+                                                    }
+                                                }
                                                 if let p = msg.localPath {
                                                     if msg.mediaType == "image" || msg.mediaType == "video" {
                                                         Button {
@@ -1070,14 +1081,32 @@ struct ChatSheetView: View {
             .background(msg.isMe ? accent : Color(white: 0.16))
             .clipShape(RoundedRectangle(cornerRadius: 16))
         } else {
-            Text(msg.text)
+            let cleanText = cleanMessageText(msg.text)
+            let isLink = detectURL(in: cleanText) != nil
+            Text(cleanText)
                 .font(.system(size: 15))
-                .foregroundColor(.white)
+                .foregroundColor(isLink ? Color(red: 0.42, green: 0.75, blue: 1.0) : .white)
+                .underline(isLink)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .background(msg.isMe ? accent : Color(white: 0.16))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
         }
+    }
+
+    private func cleanMessageText(_ text: String) -> String {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.hasPrefix("<") && t.hasSuffix(">") && t.contains("://") {
+            return String(t.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return text
+    }
+
+    private func detectURL(in text: String) -> URL? {
+        let cleaned = cleanMessageText(text)
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return nil }
+        let range = NSRange(cleaned.startIndex..., in: cleaned)
+        return detector.firstMatch(in: cleaned, options: [], range: range)?.url
     }
 
     private func showToast(_ text: String) {
