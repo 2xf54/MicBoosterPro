@@ -1,0 +1,53 @@
+name: Build ror iOS IPA
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - "ror-ios/**"
+      - ".github/workflows/build-ror.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-ror:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project & Archive
+        working-directory: ror-ios
+        run: |
+          xcodegen generate
+          xcodebuild archive \
+            -project ror.xcodeproj \
+            -scheme ror \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/ror.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package Payload into ror.ipa
+        working-directory: ror-ios
+        run: |
+          mkdir -p Payload
+          cp -r build/ror.xcarchive/Products/Applications/ror.app Payload/
+          zip -r ../ror.ipa Payload
+
+      - name: Publish ror.ipa Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ror-latest
+          name: "ror iOS App (Latest)"
+          body: "ror iOS + Share Extension IPA for AltStore"
+          files: ror.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
