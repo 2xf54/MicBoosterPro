@@ -382,7 +382,6 @@ final class RorViewModel: ObservableObject {
             await MainActor.run {
                 UIPasteboard.general.string = txt
                 self.appendChat(RorChatMessage(id: item.id, isMe: false, text: txt, date: Date()))
-                self.addHistory(RorReceivedEntry(id: item.id, type: "text", title: "Text Message", detail: txt, localPath: nil, date: Date()))
             }
             await ackItem(item.id, baseURL: baseURL)
             return
@@ -463,7 +462,7 @@ final class RorViewModel: ObservableObject {
     private func loadHistory() {
         if let data = UserDefaults.standard.data(forKey: historyKey),
            let items = try? JSONDecoder().decode([RorReceivedEntry].self, from: data) {
-            receivedItems = items
+            receivedItems = items.filter { $0.type != "text" }
         }
     }
 
@@ -497,6 +496,18 @@ final class RorViewModel: ObservableObject {
         }
     }
 
+    func deleteReceivedItems(ids: Set<String>) {
+        for item in receivedItems where ids.contains(item.id) {
+            if let p = item.localPath {
+                try? FileManager.default.removeItem(atPath: p)
+            }
+        }
+        receivedItems.removeAll { ids.contains($0.id) }
+        if let data = try? JSONEncoder().encode(receivedItems) {
+            UserDefaults.standard.set(data, forKey: historyKey)
+        }
+    }
+
     func copyReceivedItem(_ item: RorReceivedEntry) {
         if let p = item.localPath {
             if item.type == "image", let img = UIImage(contentsOfFile: p) {
@@ -524,14 +535,17 @@ struct ContentView: View {
     @State private var shareURL: URL?
     @State private var quickLookURL: URL?
     @State private var videoPlayerURL: URL?
+    @State private var isSelectingReceived = false
+    @State private var selectedReceivedIds: Set<String> = []
 
     let accent = Color(red: 1.0, green: 0.165, blue: 0.23)
     let autoSyncTimer = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
 
     var filteredItems: [RorReceivedEntry] {
+        let mediaOnly = vm.receivedItems.filter { $0.type != "text" }
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if q.isEmpty { return vm.receivedItems }
-        return vm.receivedItems.filter {
+        if q.isEmpty { return mediaOnly }
+        return mediaOnly.filter {
             $0.title.localizedCaseInsensitiveContains(q) || $0.detail.localizedCaseInsensitiveContains(q)
         }
     }
@@ -568,8 +582,31 @@ struct ContentView: View {
 
                         Spacer()
 
-                        Color.clear
-                            .frame(width: 40, height: 40)
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                isSelectingReceived.toggle()
+                                if !isSelectingReceived {
+                                    selectedReceivedIds.removeAll()
+                                }
+                            }
+                        } label: {
+                            if isSelectingReceived {
+                                Text("Done")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 14)
+                                    .frame(height: 36)
+                                    .background(accent)
+                                    .clipShape(Capsule())
+                            } else {
+                                Image(systemName: "checkmark.circle")
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .frame(width: 40, height: 40)
+                                    .background(Color(white: 0.14))
+                                    .clipShape(Circle())
+                            }
+                        }
                     }
 
                     // Search Bar
@@ -733,7 +770,13 @@ struct ContentView: View {
                         LazyVGrid(columns: columns, spacing: 18) {
                             ForEach(filteredItems) { item in
                                 Button {
-                                    if let p = item.localPath {
+                                    if isSelectingReceived {
+                                        if selectedReceivedIds.contains(item.id) {
+                                            selectedReceivedIds.remove(item.id)
+                                        } else {
+                                            selectedReceivedIds.insert(item.id)
+                                        }
+                                    } else if let p = item.localPath {
                                         if item.type == "video" {
                                             videoPlayerURL = URL(fileURLWithPath: p)
                                         } else {
@@ -744,7 +787,18 @@ struct ContentView: View {
                                         vm.statusText = "Copied text"
                                     }
                                 } label: {
-                                    ReceivedGridCard(item: item, accent: accent)
+                                    ZStack(alignment: .topTrailing) {
+                                        ReceivedGridCard(item: item, accent: accent)
+                                            .opacity(isSelectingReceived && !selectedReceivedIds.contains(item.id) ? 0.72 : 1.0)
+                                        if isSelectingReceived {
+                                            let isSel = selectedReceivedIds.contains(item.id)
+                                            Image(systemName: isSel ? "checkmark.circle.fill" : "circle")
+                                                .font(.system(size: 22, weight: .semibold))
+                                                .foregroundColor(isSel ? accent : .white.opacity(0.85))
+                                                .background(Circle().fill(Color.black.opacity(0.55)))
+                                                .padding(10)
+                                        }
+                                    }
                                 }
                                 .contextMenu {
                                     if let p = item.localPath {
@@ -778,7 +832,54 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 10)
-                .padding(.bottom, 30)
+                .padding(.bottom, isSelectingReceived ? 90 : 30)
+            }
+
+            if isSelectingReceived {
+                VStack {
+                    Spacer()
+                    HStack(spacing: 14) {
+                        Button {
+                            if selectedReceivedIds.count == filteredItems.count {
+                                selectedReceivedIds.removeAll()
+                            } else {
+                                selectedReceivedIds = Set(filteredItems.map { $0.id })
+                            }
+                        } label: {
+                            Text(selectedReceivedIds.count == filteredItems.count && !filteredItems.isEmpty ? "Deselect All" : "Select All")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 16)
+                                .frame(height: 44)
+                                .background(Color(white: 0.18))
+                                .clipShape(Capsule())
+                        }
+
+                        Spacer()
+
+                        Button(role: .destructive) {
+                            vm.deleteReceivedItems(ids: selectedReceivedIds)
+                            selectedReceivedIds.removeAll()
+                            isSelectingReceived = false
+                        } label: {
+                            Label("Delete (\(selectedReceivedIds.count))", systemImage: "trash.fill")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 18)
+                                .frame(height: 44)
+                                .background(selectedReceivedIds.isEmpty ? Color(white: 0.25) : accent)
+                                .clipShape(Capsule())
+                        }
+                        .disabled(selectedReceivedIds.isEmpty)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .preferredColorScheme(.dark)
