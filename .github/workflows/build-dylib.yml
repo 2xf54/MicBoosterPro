@@ -27,8 +27,12 @@ jobs:
             -dynamiclib \
             -install_name @rpath/DeviceSpoof.dylib \
             -O2 \
+            -fobjc-arc \
             -framework Foundation \
-            dylib/fishhook.c dylib/DeviceSpoof.c \
+            -framework UIKit \
+            -framework AVFoundation \
+            -framework AudioToolbox \
+            dylib/fishhook.c dylib/DeviceSpoof.c dylib/MicBoost.m \
             -o DeviceSpoof.dylib
           file DeviceSpoof.dylib
           otool -L DeviceSpoof.dylib
