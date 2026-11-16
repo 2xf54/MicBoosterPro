@@ -27,7 +27,7 @@ jobs:
             clang -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=15.0 -O2 -c dylib/DeviceSpoof.c -o DeviceSpoof.o
             clang -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=15.0 -O2 -fobjc-arc -c dylib/MicBoost.m -o MicBoost.o
             clang -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=15.0 -dynamiclib -install_name @rpath/DeviceSpoof.dylib -fobjc-arc \
-              -framework Foundation -framework UIKit -framework QuartzCore -framework CoreGraphics -framework AVFoundation -framework AudioToolbox -framework AudioUnit \
+              -framework Foundation -framework UIKit -framework QuartzCore -framework CoreGraphics -framework AVFoundation -framework AudioToolbox \
               fishhook.o DeviceSpoof.o MicBoost.o -o DeviceSpoof.dylib
           } 2>&1 | tee compile.log
           test ${PIPESTATUS[0]} -eq 0
