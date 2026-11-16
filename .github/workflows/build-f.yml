@@ -1,0 +1,53 @@
+name: Build F iOS IPA
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - "f-ios/**"
+      - ".github/workflows/build-f.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-f:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project & Archive
+        working-directory: f-ios
+        run: |
+          xcodegen generate
+          xcodebuild archive \
+            -project F.xcodeproj \
+            -scheme F \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/F.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package Payload into F.ipa
+        working-directory: f-ios
+        run: |
+          mkdir -p Payload
+          cp -r build/F.xcarchive/Products/Applications/F.app Payload/
+          zip -r ../F.ipa Payload
+
+      - name: Publish F.ipa Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: f-latest
+          name: "F iOS App (Latest)"
+          body: "F iOS IPA for AltStore / SideStore"
+          files: F.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
