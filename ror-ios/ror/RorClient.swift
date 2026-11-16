@@ -230,7 +230,7 @@ final class RorNetwork {
         }.resume()
     }
 
-    static func uploadFile(fileURL: URL, filename: String, batchId: String? = nil, batchCount: Int = 1, completion: @escaping (Result<Void, Error>) -> Void) {
+    static func uploadFile(fileURL: URL, filename: String, batchId: String? = nil, batchCount: Int = 1, messageId: String? = nil, completion: @escaping (Result<Void, Error>) -> Void) {
         guard let base = RorConfigStore.baseURLString,
               let url = URL(string: "\(base)/upload") else {
             completion(.failure(NSError(domain: "ror", code: -1, userInfo: [NSLocalizedDescriptionKey: "PC not paired"])))
@@ -242,6 +242,9 @@ final class RorNetwork {
         req.setValue(RorConfigStore.pairKey, forHTTPHeaderField: "X-Pair-Key")
         req.setValue("file", forHTTPHeaderField: "X-Type")
         req.setValue(UIDevice.current.name, forHTTPHeaderField: "X-Sender")
+        if let mid = messageId, !mid.isEmpty {
+            req.setValue(mid, forHTTPHeaderField: "X-Message-Id")
+        }
         let encodedName = filename.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? filename
         req.setValue(encodedName, forHTTPHeaderField: "X-Filename")
         if let batchId = batchId, batchCount > 1 {
@@ -263,7 +266,7 @@ final class RorNetwork {
         }.resume()
     }
 
-    static func uploadText(_ text: String, completion: @escaping (Result<Void, Error>) -> Void) {
+    static func uploadText(_ text: String, messageId: String? = nil, completion: @escaping (Result<Void, Error>) -> Void) {
         guard let base = RorConfigStore.baseURLString,
               let url = URL(string: "\(base)/upload") else {
             completion(.failure(NSError(domain: "ror", code: -1, userInfo: [NSLocalizedDescriptionKey: "PC not paired"])))
@@ -275,6 +278,9 @@ final class RorNetwork {
         req.setValue(RorConfigStore.pairKey, forHTTPHeaderField: "X-Pair-Key")
         req.setValue("text", forHTTPHeaderField: "X-Type")
         req.setValue(UIDevice.current.name, forHTTPHeaderField: "X-Sender")
+        if let mid = messageId, !mid.isEmpty {
+            req.setValue(mid, forHTTPHeaderField: "X-Message-Id")
+        }
         req.httpBody = text.data(using: .utf8)
 
         URLSession.shared.dataTask(with: req) { _, resp, err in
@@ -289,5 +295,18 @@ final class RorNetwork {
                 completion(.failure(NSError(domain: "ror", code: code, userInfo: [NSLocalizedDescriptionKey: "Server error HTTP \(code)"])))
             }
         }.resume()
+    }
+
+    static func deleteMessages(ids: [String]) {
+        guard !ids.isEmpty,
+              let base = RorConfigStore.baseURLString,
+              let url = URL(string: "\(base)/chat/delete") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 10
+        req.setValue(RorConfigStore.pairKey, forHTTPHeaderField: "X-Pair-Key")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["ids": ids])
+        URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
     }
 }

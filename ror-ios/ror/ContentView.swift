@@ -143,10 +143,11 @@ final class RorViewModel: ObservableObject {
     }
 
     func sendTextValue(_ text: String) {
-        appendChat(RorChatMessage(id: UUID().uuidString, isMe: true, text: text, date: Date()))
+        let msgId = UUID().uuidString
+        appendChat(RorChatMessage(id: msgId, isMe: true, text: text, date: Date()))
         RorSiriShareDonor.donateWindowsPC()
         statusText = "Sending..."
-        RorNetwork.uploadText(text) { [weak self] res in
+        RorNetwork.uploadText(text, messageId: msgId) { [weak self] res in
             DispatchQueue.main.async {
                 switch res {
                 case .success:
@@ -169,6 +170,7 @@ final class RorViewModel: ObservableObject {
         let sentDir = docs.appendingPathComponent("ror_sent", isDirectory: true)
         try? FileManager.default.createDirectory(at: sentDir, withIntermediateDirectories: true)
 
+        var msgIds: [String] = []
         for (idx, item) in files.enumerated() {
             let mtype = idx < mediaTypes.count ? mediaTypes[idx] : "file"
             var savedLocalPath: String? = nil
@@ -179,14 +181,17 @@ final class RorViewModel: ObservableObject {
                     savedLocalPath = dest.path
                 }
             }
-            appendChat(RorChatMessage(id: UUID().uuidString, isMe: true, text: item.filename, date: Date(), localPath: savedLocalPath, mediaType: mtype))
+            let mid = UUID().uuidString
+            msgIds.append(mid)
+            appendChat(RorChatMessage(id: mid, isMe: true, text: item.filename, date: Date(), localPath: savedLocalPath, mediaType: mtype))
         }
 
         Task {
             var okCount = 0
-            for (url, name) in files {
+            for (idx, (url, name)) in files.enumerated() {
+                let mid = idx < msgIds.count ? msgIds[idx] : nil
                 let success = await withCheckedContinuation { cont in
-                    RorNetwork.uploadFile(fileURL: url, filename: name, batchId: batchId, batchCount: total) { res in
+                    RorNetwork.uploadFile(fileURL: url, filename: name, batchId: batchId, batchCount: total, messageId: mid) { res in
                         try? FileManager.default.removeItem(at: url)
                         switch res {
                         case .success: cont.resume(returning: true)
@@ -209,8 +214,9 @@ final class RorViewModel: ObservableObject {
     func sendLocalFile(_ url: URL, batchId: String? = nil, batchCount: Int = 1) {
         statusText = "Sending \(url.lastPathComponent)..."
         RorSiriShareDonor.donateWindowsPC()
-        appendChat(RorChatMessage(id: UUID().uuidString, isMe: true, text: url.lastPathComponent, date: Date(), localPath: nil, mediaType: "file"))
-        RorNetwork.uploadFile(fileURL: url, filename: url.lastPathComponent, batchId: batchId, batchCount: batchCount) { [weak self] res in
+        let mid = UUID().uuidString
+        appendChat(RorChatMessage(id: mid, isMe: true, text: url.lastPathComponent, date: Date(), localPath: nil, mediaType: "file"))
+        RorNetwork.uploadFile(fileURL: url, filename: url.lastPathComponent, batchId: batchId, batchCount: batchCount, messageId: mid) { [weak self] res in
             DispatchQueue.main.async {
                 switch res {
                 case .success:
@@ -259,19 +265,33 @@ final class RorViewModel: ObservableObject {
                 return
             }
             Task {
+                var normalItems: [RorQueueItem] = []
                 for item in decoded.items {
-                    await self.downloadAndSaveItem(item, baseURL: base)
+                    if item.type == "delete" {
+                        if let raw = item.text?.data(using: .utf8),
+                           let delIds = try? JSONDecoder().decode([String].self, from: raw) {
+                            await MainActor.run {
+                                self.removeMessagesLocally(ids: Set(delIds))
+                            }
+                        }
+                        await self.ackItem(item.id, baseURL: base)
+                    } else {
+                        normalItems.append(item)
+                        await self.downloadAndSaveItem(item, baseURL: base)
+                    }
                 }
                 await MainActor.run {
                     self.isSyncing = false
-                    self.statusText = "Received \(decoded.items.count) item(s)"
-                    if UIApplication.shared.applicationState != .active {
-                        Self.postLocalNotification(
-                            body: Self.formatNotificationBody(for: decoded.items),
-                            playSound: self.playSounds
-                        )
-                    } else if self.playSounds {
-                        self.playChime()
+                    if !normalItems.isEmpty {
+                        self.statusText = "Received \(normalItems.count) item(s)"
+                        if UIApplication.shared.applicationState != .active {
+                            Self.postLocalNotification(
+                                body: Self.formatNotificationBody(for: normalItems),
+                                playSound: self.playSounds
+                            )
+                        } else if self.playSounds {
+                            self.playChime()
+                        }
                     }
                 }
             }
@@ -494,6 +514,24 @@ final class RorViewModel: ObservableObject {
         if let data = try? JSONEncoder().encode(receivedItems) {
             UserDefaults.standard.set(data, forKey: historyKey)
         }
+    }
+
+    func removeMessagesLocally(ids: Set<String>) {
+        guard !ids.isEmpty else { return }
+        chatMessages.removeAll { ids.contains($0.id) }
+        if let data = try? JSONEncoder().encode(chatMessages) {
+            UserDefaults.standard.set(data, forKey: chatKey)
+        }
+        receivedItems.removeAll { ids.contains($0.id) }
+        if let data = try? JSONEncoder().encode(receivedItems) {
+            UserDefaults.standard.set(data, forKey: historyKey)
+        }
+    }
+
+    func deleteChatMessages(ids: Set<String>) {
+        guard !ids.isEmpty else { return }
+        removeMessagesLocally(ids: ids)
+        RorNetwork.deleteMessages(ids: Array(ids))
     }
 
     func deleteReceivedItems(ids: Set<String>) {
@@ -776,11 +814,11 @@ struct ContentView: View {
                                         } else {
                                             selectedReceivedIds.insert(item.id)
                                         }
-                                    } else if let p = item.localPath {
+                                    } else if let u = resolveLocalURL(path: item.localPath, filename: item.title) {
                                         if item.type == "video" {
-                                            videoPlayerURL = URL(fileURLWithPath: p)
+                                            videoPlayerURL = u
                                         } else {
-                                            quickLookURL = URL(fileURLWithPath: p)
+                                            quickLookURL = u
                                         }
                                     } else {
                                         UIPasteboard.general.string = item.detail
@@ -1114,12 +1152,17 @@ struct ReceivedGridCard: View {
 
     @ViewBuilder
     private var cardPreview: some View {
-        if item.type == "image", let path = item.localPath, let uiImg = UIImage(contentsOfFile: path) {
+        let resolved = resolveLocalURL(path: item.localPath, filename: item.title)
+        let ext = (item.title as NSString).pathExtension.lowercased()
+        let isImg = item.type == "image" || ["png", "jpg", "jpeg", "webp", "heic", "gif"].contains(ext)
+        let isVid = item.type == "video" || ["mp4", "mov", "m4v", "avi", "mkv"].contains(ext)
+
+        if isImg, let u = resolved, let uiImg = UIImage(contentsOfFile: u.path) {
             Image(uiImage: uiImg)
                 .resizable()
                 .scaledToFill()
-        } else if item.type == "video", let path = item.localPath {
-            VideoThumbnailView(url: URL(fileURLWithPath: path))
+        } else if isVid, let u = resolved {
+            VideoThumbnailView(url: u)
         } else if item.type == "text" {
             VStack {
                 Image(systemName: "text.bubble.fill")
@@ -1148,6 +1191,8 @@ struct ChatSheetView: View {
     @State private var toastText: String? = nil
     @State private var shareFileURL: URL?
     @State private var videoPlayerURL: URL?
+    @State private var isSelectingChat = false
+    @State private var selectedChatIds: Set<String> = []
 
     var body: some View {
         NavigationStack {
@@ -1164,22 +1209,33 @@ struct ChatSheetView: View {
                                         .padding(.top, 40)
                                 }
                                 ForEach(vm.chatMessages) { msg in
-                                    HStack {
+                                    HStack(spacing: 8) {
+                                        if isSelectingChat {
+                                            let isSel = selectedChatIds.contains(msg.id)
+                                            Image(systemName: isSel ? "checkmark.circle.fill" : "circle")
+                                                .font(.system(size: 22))
+                                                .foregroundColor(isSel ? accent : .gray)
+                                                .onTapGesture {
+                                                    if isSel { selectedChatIds.remove(msg.id) } else { selectedChatIds.insert(msg.id) }
+                                                }
+                                        }
                                         if msg.isMe { Spacer(minLength: 50) }
                                         chatBubble(msg)
                                             .onTapGesture {
-                                                if msg.mediaType == nil {
+                                                if isSelectingChat {
+                                                    if selectedChatIds.contains(msg.id) { selectedChatIds.remove(msg.id) } else { selectedChatIds.insert(msg.id) }
+                                                } else if msg.mediaType == nil {
                                                     if let url = detectURL(in: msg.text) {
                                                         UIApplication.shared.open(url)
                                                     } else {
                                                         UIPasteboard.general.string = msg.text
                                                         showToast("Copy ✓")
                                                     }
-                                                } else if let p = msg.localPath {
+                                                } else if let u = resolveLocalURL(path: msg.localPath, filename: msg.text) {
                                                     if msg.mediaType == "video" {
-                                                        videoPlayerURL = URL(fileURLWithPath: p)
+                                                        videoPlayerURL = u
                                                     } else {
-                                                        shareFileURL = URL(fileURLWithPath: p)
+                                                        shareFileURL = u
                                                     }
                                                 }
                                             }
@@ -1191,10 +1247,10 @@ struct ChatSheetView: View {
                                                         Label("Open in Safari", systemImage: "safari")
                                                     }
                                                 }
-                                                if let p = msg.localPath {
+                                                if let u = resolveLocalURL(path: msg.localPath, filename: msg.text) {
                                                     if msg.mediaType == "image" || msg.mediaType == "video" {
                                                         Button {
-                                                            vm.saveMediaToPhotos(path: p, isVideo: msg.mediaType == "video") { ok in
+                                                            vm.saveMediaToPhotos(path: u.path, isVideo: msg.mediaType == "video") { ok in
                                                                 showToast(ok ? "Saved ✓" : "Failed")
                                                             }
                                                         } label: {
@@ -1202,17 +1258,28 @@ struct ChatSheetView: View {
                                                         }
                                                     } else {
                                                         Button {
-                                                            shareFileURL = URL(fileURLWithPath: p)
+                                                            shareFileURL = u
                                                         } label: {
                                                             Label("Save / Share", systemImage: "square.and.arrow.up")
                                                         }
                                                     }
                                                 }
                                                 Button {
-                                                    UIPasteboard.general.string = msg.text
+                                                    if msg.mediaType == "image",
+                                                       let u = resolveLocalURL(path: msg.localPath, filename: msg.text),
+                                                       let img = UIImage(contentsOfFile: u.path) {
+                                                        UIPasteboard.general.image = img
+                                                    } else {
+                                                        UIPasteboard.general.string = msg.text
+                                                    }
                                                     showToast("Copy ✓")
                                                 } label: {
                                                     Label("Copy", systemImage: "doc.on.doc")
+                                                }
+                                                Button(role: .destructive) {
+                                                    vm.deleteChatMessages(ids: [msg.id])
+                                                } label: {
+                                                    Label("Delete", systemImage: "trash")
                                                 }
                                             }
                                         if !msg.isMe { Spacer(minLength: 50) }
@@ -1229,8 +1296,44 @@ struct ChatSheetView: View {
                         }
                     }
 
-                    // Bottom Chat Input with + Attach Menu on the left
-                    HStack(spacing: 10) {
+                    if isSelectingChat {
+                        HStack(spacing: 14) {
+                            Button {
+                                if selectedChatIds.count == vm.chatMessages.count {
+                                    selectedChatIds.removeAll()
+                                } else {
+                                    selectedChatIds = Set(vm.chatMessages.map { $0.id })
+                                }
+                            } label: {
+                                Text(selectedChatIds.count == vm.chatMessages.count && !vm.chatMessages.isEmpty ? "Deselect All" : "Select All")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 16)
+                                    .frame(height: 40)
+                                    .background(Color(white: 0.18))
+                                    .clipShape(Capsule())
+                            }
+                            Spacer()
+                            Button(role: .destructive) {
+                                vm.deleteChatMessages(ids: selectedChatIds)
+                                selectedChatIds.removeAll()
+                                isSelectingChat = false
+                            } label: {
+                                Label("Delete (\(selectedChatIds.count))", systemImage: "trash.fill")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 18)
+                                    .frame(height: 40)
+                                    .background(selectedChatIds.isEmpty ? Color(white: 0.25) : accent)
+                                    .clipShape(Capsule())
+                            }
+                            .disabled(selectedChatIds.isEmpty)
+                        }
+                        .padding()
+                        .background(Color(white: 0.07))
+                    } else {
+                        // Bottom Chat Input with + Attach Menu on the left
+                        HStack(spacing: 10) {
                         Menu {
                             Button {
                                 showChatPhotos = true
@@ -1269,6 +1372,7 @@ struct ChatSheetView: View {
                     }
                     .padding()
                     .background(Color(white: 0.07))
+                    }
                 }
 
                 if let t = toastText {
@@ -1289,6 +1393,13 @@ struct ChatSheetView: View {
             .navigationTitle("Chat")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(isSelectingChat ? "Cancel" : "Select") {
+                        isSelectingChat.toggle()
+                        if !isSelectingChat { selectedChatIds.removeAll() }
+                    }
+                    .foregroundColor(isSelectingChat ? accent : .white)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
@@ -1340,7 +1451,8 @@ struct ChatSheetView: View {
 
     @ViewBuilder
     private func chatBubble(_ msg: RorChatMessage) -> some View {
-        if let path = msg.localPath, msg.mediaType == "image", let img = UIImage(contentsOfFile: path) {
+        let resolved = resolveLocalURL(path: msg.localPath, filename: msg.text)
+        if let u = resolved, msg.mediaType == "image", let img = UIImage(contentsOfFile: u.path) {
             VStack(alignment: .leading, spacing: 4) {
                 Image(uiImage: img)
                     .resizable()
@@ -1355,9 +1467,9 @@ struct ChatSheetView: View {
             .padding(6)
             .background(msg.isMe ? accent : Color(white: 0.16))
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        } else if let path = msg.localPath, msg.mediaType == "video" {
+        } else if let u = resolved, msg.mediaType == "video" {
             VStack(alignment: .leading, spacing: 4) {
-                VideoThumbnailView(url: URL(fileURLWithPath: path))
+                VideoThumbnailView(url: u)
                     .frame(width: 210, height: 150)
                     .clipped()
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -1470,6 +1582,13 @@ struct SetupDeviceSheetView: View {
             .navigationTitle("Set up a Device")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(isSelectingChat ? "Cancel" : "Select") {
+                        isSelectingChat.toggle()
+                        if !isSelectingChat { selectedChatIds.removeAll() }
+                    }
+                    .foregroundColor(isSelectingChat ? accent : .white)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
@@ -1538,6 +1657,13 @@ struct SettingsSheetView: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(isSelectingChat ? "Cancel" : "Select") {
+                        isSelectingChat.toggle()
+                        if !isSelectingChat { selectedChatIds.removeAll() }
+                    }
+                    .foregroundColor(isSelectingChat ? accent : .white)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
@@ -1619,12 +1745,32 @@ struct VideoThumbnailView: View {
             let asset = AVURLAsset(url: url)
             let gen = AVAssetImageGenerator(asset: asset)
             gen.appliesPreferredTrackTransform = true
+            gen.requestedTimeToleranceBefore = .zero
+            gen.requestedTimeToleranceAfter = .positiveInfinity
             gen.maximumSize = CGSize(width: 480, height: 480)
-            let time = CMTime(seconds: 0.2, preferredTimescale: 600)
-            guard let cgImg = try? gen.copyCGImage(at: time, actualTime: nil) else { return nil }
-            return UIImage(cgImage: cgImg)
+            if let cgImg = try? gen.copyCGImage(at: .zero, actualTime: nil) {
+                return UIImage(cgImage: cgImg)
+            }
+            return nil
         }.value
     }
+}
+
+func resolveLocalURL(path: String?, filename: String) -> URL? {
+    let fm = FileManager.default
+    if let p = path, !p.isEmpty, fm.fileExists(atPath: p) {
+        return URL(fileURLWithPath: p)
+    }
+    let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    let direct = docs.appendingPathComponent(filename)
+    if fm.fileExists(atPath: direct.path) {
+        return direct
+    }
+    let sent = docs.appendingPathComponent("ror_sent", isDirectory: true).appendingPathComponent(filename)
+    if fm.fileExists(atPath: sent.path) {
+        return sent
+    }
+    return nil
 }
 
 struct VideoPlayerSheet: View {
