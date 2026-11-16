@@ -205,34 +205,8 @@ static OSStatus hooked_AudioUnitRender(AudioUnit inUnit,
 
 @end
 
-// Passthrough overlay UIWindow so touches on MIC & panel always work above Telegram
-@interface MBOverlayWindow : UIWindow
-@property (nonatomic, weak) UIView *micButtonRef;
-@property (nonatomic, weak) UIView *panelViewRef;
-@end
-
-@implementation MBOverlayWindow
-- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    if (self.micButtonRef && !self.micButtonRef.hidden) {
-        CGPoint p = [self convertPoint:point toView:self.micButtonRef];
-        // Slightly generous 6pt hit padding around the button
-        if (CGRectContainsPoint(CGRectInset(self.micButtonRef.bounds, -6, -6), p)) {
-            return YES;
-        }
-    }
-    if (self.panelViewRef && self.panelViewRef.superview && !self.panelViewRef.hidden) {
-        CGPoint p = [self convertPoint:point toView:self.panelViewRef];
-        if (CGRectContainsPoint(self.panelViewRef.bounds, p)) {
-            return YES;
-        }
-    }
-    return NO;
-}
-@end
-
 // Floating UI Controller inside Telegram
 @interface MBFloatingController : NSObject
-@property (nonatomic, strong) MBOverlayWindow *overlayWindow;
 @property (nonatomic, strong) UIButton *floatingButton;
 @property (nonatomic, strong) UIView *panelView;
 @property (nonatomic, strong) UILabel *gainValueLabel;
@@ -240,6 +214,7 @@ static OSStatus hooked_AudioUnitRender(AudioUnit inUnit,
 @property (nonatomic, strong) UISwitch *enableSwitch;
 @property (nonatomic, strong) UISwitch *bypassSwitch;
 @property (nonatomic, strong) UISwitch *hardClipSwitch;
+@property (nonatomic, strong) NSTimer *keepTopTimer;
 + (instancetype)shared;
 - (void)installUI;
 @end
@@ -270,41 +245,28 @@ static OSStatus hooked_AudioUnitRender(AudioUnit inUnit,
     return nil;
 }
 
-- (UIWindow *)ensureOverlayWindow {
+- (UIWindow *)targetKeyWindow {
     UIWindowScene *ws = [self activeWindowScene];
     if (!ws) return nil;
-
-    CGRect screenBounds = [UIScreen mainScreen].bounds;
-    if (CGRectIsEmpty(screenBounds)) {
-        screenBounds = ws.coordinateSpace.bounds;
+    for (UIWindow *w in ws.windows) {
+        if (w.isKeyWindow && !w.hidden) return w;
     }
-
-    if (!self.overlayWindow) {
-        MBOverlayWindow *ow = [[MBOverlayWindow alloc] initWithWindowScene:ws];
-        ow.frame = screenBounds;
-        ow.windowLevel = 10000000.0;
-        ow.backgroundColor = [UIColor clearColor];
-        UIViewController *vc = [[UIViewController alloc] init];
-        vc.view.frame = screenBounds;
-        vc.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        vc.view.backgroundColor = [UIColor clearColor];
-        ow.rootViewController = vc;
-        ow.hidden = NO;
-        self.overlayWindow = ow;
-    } else {
-        if (self.overlayWindow.windowScene != ws) {
-            self.overlayWindow.windowScene = ws;
-        }
-        self.overlayWindow.frame = screenBounds;
-        self.overlayWindow.rootViewController.view.frame = screenBounds;
+    for (UIWindow *w in ws.windows) {
+        if (!w.hidden && w.bounds.size.width > 100) return w;
     }
-    self.overlayWindow.hidden = NO;
-    return self.overlayWindow;
+    return ws.windows.firstObject;
 }
 
 - (void)installUI {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self attachButtonIfNeeded];
+        if (!self.keepTopTimer) {
+            self.keepTopTimer = [NSTimer scheduledTimerWithTimeInterval:1.0
+                                                                 target:self
+                                                               selector:@selector(attachButtonIfNeeded)
+                                                               userInfo:nil
+                                                                repeats:YES];
+        }
     });
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(attachButtonIfNeeded)
@@ -312,17 +274,23 @@ static OSStatus hooked_AudioUnitRender(AudioUnit inUnit,
                                                object:nil];
 }
 
+- (void)handleTwoFingerLongPress:(UILongPressGestureRecognizer *)gr {
+    if (gr.state == UIGestureRecognizerStateBegan) {
+        [self togglePanel];
+    }
+}
+
 - (void)attachButtonIfNeeded {
-    UIWindow *win = [self ensureOverlayWindow];
+    UIWindow *win = [self targetKeyWindow];
     if (!win) return;
-    UIView *container = win.rootViewController.view;
 
     if (!self.floatingButton) {
         UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
-        btn.frame = CGRectMake(container.bounds.size.width - 58, 130, 46, 46);
+        btn.frame = CGRectMake(win.bounds.size.width - 58, 130, 46, 46);
         btn.layer.cornerRadius = 23;
         btn.layer.borderWidth = 1.5;
         btn.layer.borderColor = [UIColor colorWithRed:1.0 green:0.25 blue:0.25 alpha:0.9].CGColor;
+        btn.layer.zPosition = 99999;
         btn.titleLabel.font = [UIFont boldSystemFontOfSize:11];
         [btn setTitle:@"MIC" forState:UIControlStateNormal];
         [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
@@ -337,23 +305,36 @@ static OSStatus hooked_AudioUnitRender(AudioUnit inUnit,
         [self updateButtonAppearance];
     }
 
-    self.overlayWindow.micButtonRef = self.floatingButton;
-    if (self.floatingButton.superview != container) {
-        [container addSubview:self.floatingButton];
+    if (self.floatingButton.superview != win) {
+        [win addSubview:self.floatingButton];
     }
-    [container bringSubviewToFront:self.floatingButton];
+    [win bringSubviewToFront:self.floatingButton];
 
-    // Backup: attach a 3-finger tap gesture to all app windows so panel ALWAYS opens
+    if (self.panelView && self.panelView.superview) {
+        if (self.panelView.superview != win) {
+            [win addSubview:self.panelView];
+        }
+        [win bringSubviewToFront:self.panelView];
+    }
+
+    // Attach 2-finger double-tap AND 2-finger long-press (never conflicts with TGExtra's 3-finger tap)
     static const void *kMBGestureKey = &kMBGestureKey;
     UIWindowScene *ws = [self activeWindowScene];
     if (ws) {
         for (UIWindow *w in ws.windows) {
-            if (w == self.overlayWindow) continue;
             if (!objc_getAssociatedObject(w, kMBGestureKey)) {
-                UITapGestureRecognizer *threeTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(togglePanel)];
-                threeTap.numberOfTouchesRequired = 3;
-                threeTap.cancelsTouchesInView = NO;
-                [w addGestureRecognizer:threeTap];
+                UITapGestureRecognizer *twoDoubleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(togglePanel)];
+                twoDoubleTap.numberOfTouchesRequired = 2;
+                twoDoubleTap.numberOfTapsRequired = 2;
+                twoDoubleTap.cancelsTouchesInView = NO;
+                [w addGestureRecognizer:twoDoubleTap];
+
+                UILongPressGestureRecognizer *twoLongPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleTwoFingerLongPress:)];
+                twoLongPress.numberOfTouchesRequired = 2;
+                twoLongPress.minimumPressDuration = 0.55;
+                twoLongPress.cancelsTouchesInView = NO;
+                [w addGestureRecognizer:twoLongPress];
+
                 objc_setAssociatedObject(w, kMBGestureKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             }
         }
@@ -380,16 +361,16 @@ static OSStatus hooked_AudioUnitRender(AudioUnit inUnit,
 }
 
 - (void)togglePanel {
-    UIWindow *win = [self ensureOverlayWindow];
+    UIWindow *win = [self targetKeyWindow];
     if (!win) return;
-    UIView *container = win.rootViewController.view;
 
     if (self.panelView && self.panelView.superview) {
         [self.panelView removeFromSuperview];
         return;
     }
 
-    UIView *panel = [[UIView alloc] initWithFrame:CGRectMake(24, (container.bounds.size.height - 290) / 2.0, container.bounds.size.width - 48, 290)];
+    UIView *panel = [[UIView alloc] initWithFrame:CGRectMake(24, (win.bounds.size.height - 290) / 2.0, win.bounds.size.width - 48, 290)];
+    panel.layer.zPosition = 99998;
     panel.backgroundColor = [UIColor colorWithRed:0.06 green:0.07 blue:0.10 alpha:0.96];
     panel.layer.cornerRadius = 18;
     panel.layer.borderWidth = 1.2;
@@ -472,13 +453,11 @@ static OSStatus hooked_AudioUnitRender(AudioUnit inUnit,
     self.hardClipSwitch = sw3;
 
     self.panelView = panel;
-    self.overlayWindow.panelViewRef = panel;
-    [container addSubview:panel];
-    [container bringSubviewToFront:panel];
+    [win addSubview:panel];
+    [win bringSubviewToFront:panel];
     if (self.floatingButton) {
-        [container bringSubviewToFront:self.floatingButton];
+        [win bringSubviewToFront:self.floatingButton];
     }
-    [self.overlayWindow makeKeyAndVisible];
 }
 
 - (void)onToggleEnable:(UISwitch *)sender {
