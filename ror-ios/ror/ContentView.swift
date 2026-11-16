@@ -1582,13 +1582,6 @@ struct SetupDeviceSheetView: View {
             .navigationTitle("Set up a Device")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(isSelectingChat ? "Cancel" : "Select") {
-                        isSelectingChat.toggle()
-                        if !isSelectingChat { selectedChatIds.removeAll() }
-                    }
-                    .foregroundColor(isSelectingChat ? accent : .white)
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
@@ -1657,13 +1650,6 @@ struct SettingsSheetView: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(isSelectingChat ? "Cancel" : "Select") {
-                        isSelectingChat.toggle()
-                        if !isSelectingChat { selectedChatIds.removeAll() }
-                    }
-                    .foregroundColor(isSelectingChat ? accent : .white)
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
