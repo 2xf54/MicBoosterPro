@@ -205,6 +205,8 @@ static OSStatus hooked_AudioUnitRender(AudioUnit inUnit,
 
 @end
 
+static void MBInstallTouchRouter(void);
+
 // Floating UI Controller inside Telegram
 @interface MBFloatingController : NSObject
 @property (nonatomic, strong) UIButton *floatingButton;
@@ -259,6 +261,7 @@ static OSStatus hooked_AudioUnitRender(AudioUnit inUnit,
 
 - (void)installUI {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        MBInstallTouchRouter();
         [self attachButtonIfNeeded];
         if (!self.keepTopTimer) {
             self.keepTopTimer = [NSTimer scheduledTimerWithTimeInterval:1.0
@@ -292,7 +295,7 @@ static OSStatus hooked_AudioUnitRender(AudioUnit inUnit,
         btn.layer.borderColor = [UIColor colorWithRed:1.0 green:0.25 blue:0.25 alpha:0.9].CGColor;
         btn.layer.zPosition = 99999;
         btn.titleLabel.font = [UIFont boldSystemFontOfSize:11];
-        [btn setTitle:@"MIC" forState:UIControlStateNormal];
+        [btn setTitle:@"MIC+" forState:UIControlStateNormal];
         [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
 
         UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(togglePanel)];
@@ -628,10 +631,15 @@ static void mb_UIApplication_sendEvent(id self, SEL _cmd, UIEvent *event) {
 }
 
 static void MBInstallTouchRouter(void) {
-    Method m = class_getInstanceMethod([UIApplication class], @selector(sendEvent:));
-    if (m) {
-        orig_UIApplication_sendEvent = (void (*)(id, SEL, UIEvent *))method_setImplementation(m, (IMP)mb_UIApplication_sendEvent);
-    }
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        UIApplication *app = [UIApplication sharedApplication];
+        Class appCls = app ? object_getClass(app) : [UIApplication class];
+        Method m = class_getInstanceMethod(appCls, @selector(sendEvent:));
+        if (m) {
+            orig_UIApplication_sendEvent = (void (*)(id, SEL, UIEvent *))method_setImplementation(m, (IMP)mb_UIApplication_sendEvent);
+        }
+    });
 }
 
 @interface MBDummyEnd : NSObject
