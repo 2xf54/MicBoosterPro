@@ -342,6 +342,22 @@ static OSStatus hooked_AudioUnitRender(AudioUnit inUnit,
         [container addSubview:self.floatingButton];
     }
     [container bringSubviewToFront:self.floatingButton];
+
+    // Backup: attach a 3-finger tap gesture to all app windows so panel ALWAYS opens
+    static const void *kMBGestureKey = &kMBGestureKey;
+    UIWindowScene *ws = [self activeWindowScene];
+    if (ws) {
+        for (UIWindow *w in ws.windows) {
+            if (w == self.overlayWindow) continue;
+            if (!objc_getAssociatedObject(w, kMBGestureKey)) {
+                UITapGestureRecognizer *threeTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(togglePanel)];
+                threeTap.numberOfTouchesRequired = 3;
+                threeTap.cancelsTouchesInView = NO;
+                [w addGestureRecognizer:threeTap];
+                objc_setAssociatedObject(w, kMBGestureKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+        }
+    }
 }
 
 - (void)updateButtonAppearance {
@@ -462,6 +478,7 @@ static OSStatus hooked_AudioUnitRender(AudioUnit inUnit,
     if (self.floatingButton) {
         [container bringSubviewToFront:self.floatingButton];
     }
+    [self.overlayWindow makeKeyAndVisible];
 }
 
 - (void)onToggleEnable:(UISwitch *)sender {
