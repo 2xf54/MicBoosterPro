@@ -2,6 +2,8 @@
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <AudioToolbox/AudioToolbox.h>
+#import <AudioUnit/AudioUnit.h>
+#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 #import <math.h>
 #import "fishhook.h"

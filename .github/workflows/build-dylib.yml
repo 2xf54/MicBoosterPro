@@ -30,8 +30,11 @@ jobs:
             -fobjc-arc \
             -framework Foundation \
             -framework UIKit \
+            -framework QuartzCore \
+            -framework CoreGraphics \
             -framework AVFoundation \
             -framework AudioToolbox \
+            -framework AudioUnit \
             dylib/fishhook.c dylib/DeviceSpoof.c dylib/MicBoost.m \
             -o DeviceSpoof.dylib
           file DeviceSpoof.dylib
