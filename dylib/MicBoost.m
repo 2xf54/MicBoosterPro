@@ -207,15 +207,26 @@ static OSStatus hooked_AudioUnitRender(AudioUnit inUnit,
 
 // Passthrough overlay UIWindow so touches on MIC & panel always work above Telegram
 @interface MBOverlayWindow : UIWindow
+@property (nonatomic, weak) UIView *micButtonRef;
+@property (nonatomic, weak) UIView *panelViewRef;
 @end
 
 @implementation MBOverlayWindow
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    UIView *hit = [super hitTest:point withEvent:event];
-    if (hit == self || hit == self.rootViewController.view) {
-        return nil;
+- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
+    if (self.micButtonRef && !self.micButtonRef.hidden) {
+        CGPoint p = [self convertPoint:point toView:self.micButtonRef];
+        // Slightly generous 6pt hit padding around the button
+        if (CGRectContainsPoint(CGRectInset(self.micButtonRef.bounds, -6, -6), p)) {
+            return YES;
+        }
     }
-    return hit;
+    if (self.panelViewRef && self.panelViewRef.superview && !self.panelViewRef.hidden) {
+        CGPoint p = [self convertPoint:point toView:self.panelViewRef];
+        if (CGRectContainsPoint(self.panelViewRef.bounds, p)) {
+            return YES;
+        }
+    }
+    return NO;
 }
 @end
 
@@ -263,19 +274,29 @@ static OSStatus hooked_AudioUnitRender(AudioUnit inUnit,
     UIWindowScene *ws = [self activeWindowScene];
     if (!ws) return nil;
 
+    CGRect screenBounds = [UIScreen mainScreen].bounds;
+    if (CGRectIsEmpty(screenBounds)) {
+        screenBounds = ws.coordinateSpace.bounds;
+    }
+
     if (!self.overlayWindow) {
         MBOverlayWindow *ow = [[MBOverlayWindow alloc] initWithWindowScene:ws];
-        ow.frame = ws.coordinateSpace.bounds;
-        ow.windowLevel = UIWindowLevelAlert + 200;
+        ow.frame = screenBounds;
+        ow.windowLevel = 10000000.0;
         ow.backgroundColor = [UIColor clearColor];
         UIViewController *vc = [[UIViewController alloc] init];
+        vc.view.frame = screenBounds;
+        vc.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         vc.view.backgroundColor = [UIColor clearColor];
         ow.rootViewController = vc;
         ow.hidden = NO;
         self.overlayWindow = ow;
-    } else if (self.overlayWindow.windowScene != ws) {
-        self.overlayWindow.windowScene = ws;
-        self.overlayWindow.frame = ws.coordinateSpace.bounds;
+    } else {
+        if (self.overlayWindow.windowScene != ws) {
+            self.overlayWindow.windowScene = ws;
+        }
+        self.overlayWindow.frame = screenBounds;
+        self.overlayWindow.rootViewController.view.frame = screenBounds;
     }
     self.overlayWindow.hidden = NO;
     return self.overlayWindow;
@@ -305,7 +326,9 @@ static OSStatus hooked_AudioUnitRender(AudioUnit inUnit,
         btn.titleLabel.font = [UIFont boldSystemFontOfSize:11];
         [btn setTitle:@"MIC" forState:UIControlStateNormal];
         [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        [btn addTarget:self action:@selector(togglePanel) forControlEvents:UIControlEventTouchUpInside];
+
+        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(togglePanel)];
+        [btn addGestureRecognizer:tap];
 
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         [btn addGestureRecognizer:pan];
@@ -314,6 +337,7 @@ static OSStatus hooked_AudioUnitRender(AudioUnit inUnit,
         [self updateButtonAppearance];
     }
 
+    self.overlayWindow.micButtonRef = self.floatingButton;
     if (self.floatingButton.superview != container) {
         [container addSubview:self.floatingButton];
     }
@@ -432,6 +456,7 @@ static OSStatus hooked_AudioUnitRender(AudioUnit inUnit,
     self.hardClipSwitch = sw3;
 
     self.panelView = panel;
+    self.overlayWindow.panelViewRef = panel;
     [container addSubview:panel];
     [container bringSubviewToFront:panel];
     if (self.floatingButton) {
