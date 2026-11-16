@@ -486,6 +486,158 @@ static OSStatus hooked_AudioUnitRender(AudioUnit inUnit,
     MBSaveSettings();
 }
 
+// ---------------------------------------------------------------------------
+// Manual touch routing.
+// Telegram's custom UIWindow overrides hitTest: and never returns views that
+// are not part of its own node hierarchy, so our button/panel never receive
+// touches through normal UIKit. We intercept touches at UIApplication level
+// and handle them ourselves before Telegram sees them.
+// ---------------------------------------------------------------------------
+static const void *kMBTouchOwnerKey = &kMBTouchOwnerKey;
+static const void *kMBTouchStartKey = &kMBTouchStartKey;
+
+static BOOL MBPointInView(UITouch *t, UIView *v, CGFloat pad) {
+    if (!v || !v.window || v.hidden || v.alpha < 0.05) return NO;
+    CGPoint p = [t locationInView:v];
+    return CGRectContainsPoint(CGRectInset(v.bounds, -pad, -pad), p);
+}
+
+- (void)applySliderTouch:(UITouch *)t {
+    UISlider *s = self.gainSlider;
+    if (!s) return;
+    CGPoint p = [t locationInView:s];
+    CGFloat w = MAX(1.0, s.bounds.size.width);
+    CGFloat ratio = MAX(0.0, MIN(1.0, p.x / w));
+    s.value = s.minimumValue + ratio * (s.maximumValue - s.minimumValue);
+    [self onGainChanged:s];
+}
+
+- (void)flipSwitch:(UISwitch *)sw {
+    [sw setOn:!sw.isOn animated:YES];
+    [sw sendActionsForControlEvents:UIControlEventValueChanged];
+}
+
+- (void)panelTapEndedAt:(UITouch *)t {
+    UIView *panel = self.panelView;
+    // Close button = any UIButton inside panel
+    for (UIView *sub in panel.subviews) {
+        if ([sub isKindOfClass:[UIButton class]] && MBPointInView(t, sub, 8)) {
+            [self togglePanel];
+            return;
+        }
+    }
+    // Switches: tapping anywhere on the row toggles it
+    NSArray *switches = @[self.enableSwitch ?: (id)[NSNull null],
+                                      self.bypassSwitch ?: (id)[NSNull null],
+                                      self.hardClipSwitch ?: (id)[NSNull null]];
+    CGPoint pp = [t locationInView:panel];
+    for (id obj in switches) {
+        if (![obj isKindOfClass:[UISwitch class]]) continue;
+        UISwitch *sw = obj;
+        CGRect row = CGRectMake(0, CGRectGetMinY(sw.frame) - 6, panel.bounds.size.width, sw.frame.size.height + 12);
+        if (CGRectContainsPoint(row, pp)) {
+            [self flipSwitch:sw];
+            return;
+        }
+    }
+}
+
+// Returns YES if the event was fully consumed by our UI.
+- (BOOL)mb_handleTouchEvent:(UIEvent *)event {
+    NSSet<UITouch *> *touches = [event allTouches];
+    if (touches.count == 0) return NO;
+
+    BOOL allOurs = YES;
+    BOOL anyOurs = NO;
+
+    for (UITouch *t in touches) {
+        NSString *owner = objc_getAssociatedObject(t, kMBTouchOwnerKey);
+
+        if (t.phase == UITouchPhaseBegan && owner == nil) {
+            BOOL panelOpen = (self.panelView && self.panelView.superview);
+            if (MBPointInView(t, self.floatingButton, 10)) {
+                owner = @"button";
+            } else if (panelOpen && MBPointInView(t, self.gainSlider, 14)) {
+                owner = @"slider";
+                [self applySliderTouch:t];
+            } else if (panelOpen && MBPointInView(t, self.panelView, 0)) {
+                owner = @"panel";
+            } else {
+                owner = @"app";
+            }
+            objc_setAssociatedObject(t, kMBTouchOwnerKey, owner, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            CGPoint start = [t locationInView:nil];
+            objc_setAssociatedObject(t, kMBTouchStartKey, [NSValue valueWithCGPoint:start], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+
+        if (owner == nil || [owner isEqualToString:@"app"]) {
+            allOurs = NO;
+            continue;
+        }
+        anyOurs = YES;
+
+        CGPoint start = [objc_getAssociatedObject(t, kMBTouchStartKey) CGPointValue];
+        CGPoint now = [t locationInView:nil];
+        CGFloat moved = hypot(now.x - start.x, now.y - start.y);
+
+        if ([owner isEqualToString:@"button"]) {
+            if (t.phase == UITouchPhaseMoved && moved > 8) {
+                UIView *sv = self.floatingButton.superview;
+                if (sv) {
+                    CGPoint c = [t locationInView:sv];
+                    c.x = MAX(26, MIN(sv.bounds.size.width - 26, c.x));
+                    c.y = MAX(60, MIN(sv.bounds.size.height - 60, c.y));
+                    self.floatingButton.center = c;
+                }
+            } else if (t.phase == UITouchPhaseEnded && moved <= 12) {
+                [self togglePanel];
+            }
+        } else if ([owner isEqualToString:@"slider"]) {
+            if (t.phase == UITouchPhaseMoved || t.phase == UITouchPhaseEnded) {
+                [self applySliderTouch:t];
+            }
+        } else if ([owner isEqualToString:@"panel"]) {
+            if (t.phase == UITouchPhaseEnded && moved <= 12) {
+                [self panelTapEndedAt:t];
+            }
+        }
+    }
+
+    // Swallow only when every touch in this event belongs to our UI,
+    // so Telegram never gets half a touch sequence.
+    return anyOurs && allOurs;
+}
+
+@end
+
+static void (*orig_UIApplication_sendEvent)(id, SEL, UIEvent *) = NULL;
+
+static void mb_UIApplication_sendEvent(id self, SEL _cmd, UIEvent *event) {
+    if (event.type == UIEventTypeTouches) {
+        BOOL consumed = NO;
+        @try {
+            consumed = [[MBFloatingController shared] mb_handleTouchEvent:event];
+        } @catch (__unused NSException *e) {
+            consumed = NO;
+        }
+        if (consumed) return;
+    }
+    if (orig_UIApplication_sendEvent) {
+        orig_UIApplication_sendEvent(self, _cmd, event);
+    }
+}
+
+static void MBInstallTouchRouter(void) {
+    Method m = class_getInstanceMethod([UIApplication class], @selector(sendEvent:));
+    if (m) {
+        orig_UIApplication_sendEvent = (void (*)(id, SEL, UIEvent *))method_setImplementation(m, (IMP)mb_UIApplication_sendEvent);
+    }
+}
+
+@interface MBDummyEnd : NSObject
+@end
+@implementation MBDummyEnd
+
 @end
 
 __attribute__((constructor))
@@ -509,6 +661,7 @@ static void init_mic_boost(void) {
     if (m3 && m4) method_exchangeImplementations(m3, m4);
 
     dispatch_async(dispatch_get_main_queue(), ^{
+        MBInstallTouchRouter();
         [[MBFloatingController shared] installUI];
     });
 }
