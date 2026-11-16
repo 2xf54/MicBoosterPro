@@ -19,33 +19,38 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Compile DeviceSpoof.dylib (arm64 iOS)
+        id: compile
         run: |
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
-          clang -arch arm64 \
-            -isysroot "$SDK_PATH" \
-            -miphoneos-version-min=15.0 \
-            -dynamiclib \
-            -install_name @rpath/DeviceSpoof.dylib \
-            -O2 \
-            -fobjc-arc \
-            -framework Foundation \
-            -framework UIKit \
-            -framework QuartzCore \
-            -framework CoreGraphics \
-            -framework AVFoundation \
-            -framework AudioToolbox \
-            -framework AudioUnit \
-            dylib/fishhook.c dylib/DeviceSpoof.c dylib/MicBoost.m \
-            -o DeviceSpoof.dylib
+          {
+            clang -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=15.0 -O2 -c dylib/fishhook.c -o fishhook.o
+            clang -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=15.0 -O2 -c dylib/DeviceSpoof.c -o DeviceSpoof.o
+            clang -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=15.0 -O2 -fobjc-arc -c dylib/MicBoost.m -o MicBoost.o
+            clang -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=15.0 -dynamiclib -install_name @rpath/DeviceSpoof.dylib -fobjc-arc \
+              -framework Foundation -framework UIKit -framework QuartzCore -framework CoreGraphics -framework AVFoundation -framework AudioToolbox -framework AudioUnit \
+              fishhook.o DeviceSpoof.o MicBoost.o -o DeviceSpoof.dylib
+          } 2>&1 | tee compile.log
+          test ${PIPESTATUS[0]} -eq 0
           file DeviceSpoof.dylib
           otool -L DeviceSpoof.dylib
 
+      - name: Publish Compile Log on Failure
+        if: failure()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dylib-debug
+          name: "Dylib Compile Debug Log"
+          files: compile.log
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish DeviceSpoof.dylib Release
+        if: success()
         uses: softprops/action-gh-release@v2
         with:
           tag_name: dylib-latest
-          name: "DeviceSpoof Dylib (Unknown)"
-          body: "iOS arm64 dylib that spoofs uname/hw.machine to Unknown for sideloaded IPAs."
+          name: "DeviceSpoof Dylib (Unknown + MicBoost)"
+          body: "iOS arm64 dylib with DeviceSpoof + Extra Mic Boost + Floating UI."
           files: DeviceSpoof.dylib
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
