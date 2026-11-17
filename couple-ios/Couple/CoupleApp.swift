@@ -371,11 +371,15 @@ struct CustomizeThemeSheet: View {
     @EnvironmentObject var store: CoupleStore
     @Environment(\.dismiss) var dismiss
     @State private var bgItem: PhotosPickerItem?
+    @State private var widgetBgItem: PhotosPickerItem?
 
     private let bgPresets: [(String, String)] = [
         ("Rose Pink", "DEB6BE"),
+        ("Pure White", "FFFFFF"),
+        ("Soft Cream", "F7EFE5"),
         ("Soft Peach", "E8C3B9"),
         ("Lavender", "C8BFE7"),
+        ("Sky Blue", "B8D8EB"),
         ("Midnight", "161824"),
         ("Crimson Night", "2A1219")
     ]
@@ -410,20 +414,37 @@ struct CustomizeThemeSheet: View {
                     TextField("Widget Subtitle (e.g. GRG)", text: $store.config.widgetSubtitle)
                 }
 
-                Section("Widget Background Color") {
+                Section("Widget Background") {
+                    Toggle("Use Photo for Widget Background", isOn: $store.config.widgetUsePhotoBg)
+                        .onChange(of: store.config.widgetUsePhotoBg) { _, _ in store.saveConfig() }
+
+                    PhotosPicker(selection: $widgetBgItem, matching: .images) {
+                        Label("Choose Widget Photo (Auto-Fits Size)", systemImage: "photo.badge.plus")
+                    }
+
+                    if store.widgetBackgroundImage != nil {
+                        Button(role: .destructive) {
+                            store.saveImage(nil, named: "widget_bg.jpg")
+                        } label: {
+                            Text("Remove Custom Widget Photo")
+                        }
+                    }
+
                     ForEach(bgPresets, id: \.1) { preset in
                         Button {
+                            store.config.widgetUsePhotoBg = false
                             store.config.themeBgHex = preset.1
                             store.saveConfig()
                         } label: {
                             HStack {
                                 Circle()
                                     .fill(Color(hex: preset.1))
+                                    .overlay(Circle().stroke(Color.gray.opacity(0.4), lineWidth: 0.8))
                                     .frame(width: 24, height: 24)
                                 Text(preset.0)
                                     .foregroundColor(.primary)
                                 Spacer()
-                                if store.config.themeBgHex == preset.1 {
+                                if !store.config.widgetUsePhotoBg && store.config.themeBgHex == preset.1 {
                                     Image(systemName: "checkmark")
                                         .foregroundColor(.pink)
                                 }
@@ -447,6 +468,18 @@ struct CustomizeThemeSheet: View {
                        let img = UIImage(data: data) {
                         await MainActor.run {
                             store.saveImage(img, named: "background.jpg", maxDimension: 900)
+                        }
+                    }
+                }
+            }
+            .onChange(of: widgetBgItem) { _, newItem in
+                Task {
+                    if let data = try? await newItem?.loadTransferable(type: Data.self),
+                       let img = UIImage(data: data) {
+                        await MainActor.run {
+                            store.config.widgetUsePhotoBg = true
+                            store.saveConfig()
+                            store.saveImage(img, named: "widget_bg.jpg", maxDimension: 700)
                         }
                     }
                 }
@@ -720,11 +753,20 @@ struct MySettingsTabView: View {
                     HStack {
                         Text("Widget Sync (App Group)")
                         Spacer()
-                        Text(store.isAppGroupAvailable ? "Connected" : "Fallback Mode")
+                        Text(store.isAppGroupAvailable ? "Connected ✅" : "Not Linked ❌")
                             .font(.caption.bold())
-                            .foregroundColor(store.isAppGroupAvailable ? .green : .orange)
+                            .foregroundColor(store.isAppGroupAvailable ? .green : .red)
                     }
-                    Text("The Couple v1.3 • If avatars don't appear in the widget right away, tap Refresh above or re-add the widget once.")
+                    HStack {
+                        Text("App Version")
+                        Spacer()
+                        let ver = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.4"
+                        let bld = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "5"
+                        Text("v\(ver) (Build \(bld))")
+                            .font(.caption.bold())
+                            .foregroundColor(.secondary)
+                    }
+                    Text("If Widget Sync says 'Not Linked', your installer/Plus store stripped App Groups; install via Sideloadly (Keep App Extensions) so avatars & dates sync to widgets.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

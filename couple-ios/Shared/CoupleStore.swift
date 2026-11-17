@@ -98,6 +98,7 @@ struct CoupleConfig: Codable {
     var countInclusive: Bool = false
     var useDarkTextOnPhoto: Bool = false
     var bgDimOpacity: Double = 0.35
+    var widgetUsePhotoBg: Bool = false
 
     var showDistance: Bool = true
     var city1Name: String = "Riyadh"
@@ -118,17 +119,31 @@ final class CoupleStore: ObservableObject {
     @Published var avatar1Image: UIImage?
     @Published var avatar2Image: UIImage?
     @Published var backgroundImage: UIImage?
+    @Published var widgetBackgroundImage: UIImage?
+
+    private static var resolvedGroupID: String = {
+        let candidates = [
+            appGroupID,
+            "group." + (Bundle.main.bundleIdentifier?.replacingOccurrences(of: ".widget", with: "") ?? "")
+        ]
+        for gid in candidates where !gid.isEmpty {
+            if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: gid) != nil {
+                return gid
+            }
+        }
+        return appGroupID
+    }()
 
     var isAppGroupAvailable: Bool {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupID) != nil
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.resolvedGroupID) != nil
     }
 
     private var defaults: UserDefaults {
-        UserDefaults(suiteName: Self.appGroupID) ?? .standard
+        UserDefaults(suiteName: Self.resolvedGroupID) ?? .standard
     }
 
     private var sharedContainerURL: URL {
-        if let groupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupID) {
+        if let groupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.resolvedGroupID) {
             return groupURL
         }
         return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -154,6 +169,7 @@ final class CoupleStore: ObservableObject {
         avatar1Image = loadImage(named: "avatar1.jpg", defaultsKey: "avatar1_data")
         avatar2Image = loadImage(named: "avatar2.jpg", defaultsKey: "avatar2_data")
         backgroundImage = loadImage(named: "background.jpg", defaultsKey: "background_data")
+        widgetBackgroundImage = loadImage(named: "widget_bg.jpg", defaultsKey: "widget_bg_data")
     }
 
     func saveConfig() {

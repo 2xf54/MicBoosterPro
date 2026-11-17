@@ -17,6 +17,7 @@ struct CoupleEntry: TimelineEntry {
     let avatar1: UIImage?
     let avatar2: UIImage?
     let background: UIImage?
+    let widgetBackground: UIImage?
 }
 
 struct CoupleProvider: TimelineProvider {
@@ -63,7 +64,8 @@ struct CoupleProvider: TimelineProvider {
             distanceText: store.formattedDistance(),
             avatar1: store.avatar1Image,
             avatar2: store.avatar2Image,
-            background: store.backgroundImage
+            background: store.backgroundImage,
+            widgetBackground: store.widgetBackgroundImage
         )
     }
 }
@@ -102,16 +104,15 @@ struct WidgetAvatarView: View {
     }
 }
 
-// Horseshoe arc matching the reference widget (wraps sides & top, leaving center clean)
 struct HorseshoeArcShape: Shape {
     var progress: Double
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        let radius = min(rect.width * 0.36, rect.height * 0.47)
-        let center = CGPoint(x: rect.midX, y: rect.midY + rect.height * 0.06)
-        let startDeg = 152.0
-        let sweepDeg = 236.0
+        let radius = min(rect.width * 0.36, rect.height * 0.45)
+        let center = CGPoint(x: rect.midX, y: rect.midY + rect.height * 0.04)
+        let startDeg = 160.0
+        let sweepDeg = 220.0
         let clamped = max(0.03, min(1.0, progress))
         let endDeg = startDeg + sweepDeg * clamped
         path.addArc(
@@ -125,13 +126,34 @@ struct HorseshoeArcShape: Shape {
     }
 }
 
+private func isDarkHex(_ hex: String) -> Bool {
+    let clean = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+    var val: UInt64 = 0
+    Scanner(string: clean).scanHexInt64(&val)
+    let r = Double((val >> 16) & 0xFF) / 255.0
+    let g = Double((val >> 8) & 0xFF) / 255.0
+    let b = Double(val & 0xFF) / 255.0
+    let lum = 0.299 * r + 0.587 * g + 0.114 * b
+    return lum < 0.5
+}
+
 // MARK: - 1. Couple Arc & Classic Widget
 struct CoupleHomeWidgetView: View {
     @Environment(\.widgetFamily) var family
     let entry: CoupleEntry
 
-    private var fgColor: Color {
-        entry.config.useDarkTextOnPhoto ? Color(hex: "2B1D1B") : .white
+    private var activePhoto: UIImage? {
+        if entry.config.widgetUsePhotoBg {
+            return entry.widgetBackground ?? entry.background
+        }
+        return nil
+    }
+
+    private var inkColor: Color {
+        if activePhoto != nil {
+            return entry.config.useDarkTextOnPhoto ? Color(hex: "2B1D1B") : .white
+        }
+        return isDarkHex(entry.config.themeBgHex) ? .white : Color(hex: "4A2A27")
     }
 
     var body: some View {
@@ -153,12 +175,12 @@ struct CoupleHomeWidgetView: View {
 
             Text("\(entry.totalDays)")
                 .font(.system(size: 36, weight: .heavy, design: .rounded))
-                .foregroundColor(fgColor)
+                .foregroundColor(inkColor)
                 .minimumScaleFactor(0.6)
 
             Text(entry.totalDays == 1 ? "day" : "days")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(fgColor.opacity(0.85))
+                .foregroundColor(inkColor.opacity(0.85))
                 .offset(y: -4)
 
             HStack(spacing: 5) {
@@ -169,51 +191,50 @@ struct CoupleHomeWidgetView: View {
                 Text(entry.config.partner2Name)
             }
             .font(.system(size: 11, weight: .bold, design: .rounded))
-            .foregroundColor(fgColor.opacity(0.92))
+            .foregroundColor(inkColor.opacity(0.92))
         }
         .padding(10)
         .containerBackground(for: .widget) {
-            photoOrGradientBackground
+            arcOrPhotoBackground
         }
     }
 
     private func arcView(isLarge: Bool) -> some View {
-        let inkColor = Color(hex: "4A2A27")
-        let avatarSize: CGFloat = isLarge ? 56 : 36
+        let avatarSize: CGFloat = isLarge ? 56 : 34
         let titleSize: CGFloat = isLarge ? 16 : 11
-        let mainSize: CGFloat = isLarge ? 26 : 17
-        let subSize: CGFloat = isLarge ? 14 : 10
-        let strokeW: CGFloat = isLarge ? 11 : 7
+        let mainSize: CGFloat = isLarge ? 25 : 16
+        let subSize: CGFloat = isLarge ? 13 : 10
+        let strokeW: CGFloat = isLarge ? 11 : 6.5
 
         return GeometryReader { geo in
-            let radius = min(geo.size.width * 0.36, geo.size.height * 0.47)
-            let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2 + geo.size.height * 0.06)
+            let radius = min(geo.size.width * 0.36, geo.size.height * 0.45)
+            let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2 + geo.size.height * 0.04)
 
             ZStack {
-                // Background track & active progress arc
+                // Arc track & active progress
                 HorseshoeArcShape(progress: 1.0)
                     .stroke(inkColor.opacity(0.18), style: StrokeStyle(lineWidth: strokeW, lineCap: .round))
                 HorseshoeArcShape(progress: entry.yearProgress)
                     .stroke(Color(hex: entry.config.accentHex), style: StrokeStyle(lineWidth: strokeW, lineCap: .round))
 
-                // 0y and 1y labels positioned right under the arc tips
+                // 0y and 1y placed clearly outside the arc tips so they NEVER touch avatars
                 Text("\(entry.yearFloor)y")
                     .font(.system(size: isLarge ? 13 : 10, weight: .bold, design: .rounded))
-                    .foregroundColor(inkColor.opacity(0.65))
+                    .foregroundColor(inkColor.opacity(0.72))
                     .position(
-                        x: center.x - radius * 0.88,
-                        y: center.y + radius * 0.62
+                        x: max(20, center.x - radius - (isLarge ? 22 : 16)),
+                        y: center.y + radius * 0.48
                     )
 
                 Text("\(entry.yearFloor + 1)y")
                     .font(.system(size: isLarge ? 13 : 10, weight: .bold, design: .rounded))
-                    .foregroundColor(inkColor.opacity(0.65))
+                    .foregroundColor(inkColor.opacity(0.72))
                     .position(
-                        x: center.x + radius * 0.88,
-                        y: center.y + radius * 0.62
+                        x: min(geo.size.width - 20, center.x + radius + (isLarge ? 22 : 16)),
+                        y: center.y + radius * 0.48
                     )
 
-                // Center content cleanly inside the horseshoe
+                // Center content cleanly inside the arch
                 VStack(spacing: isLarge ? 6 : 2) {
                     Text(entry.config.widgetTitle)
                         .font(.system(size: titleSize, weight: .bold, design: .rounded))
@@ -226,10 +247,20 @@ struct CoupleHomeWidgetView: View {
                         .minimumScaleFactor(0.7)
                         .lineLimit(1)
 
-                    Text(entry.config.showDistance ? "\(entry.config.widgetSubtitle) • \(entry.distanceText)" : entry.config.widgetSubtitle)
-                        .font(.system(size: subSize, weight: .bold, design: .rounded))
-                        .foregroundColor(inkColor.opacity(0.82))
-                        .lineLimit(1)
+                    let subText: String = {
+                        let base = entry.config.widgetSubtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if entry.config.showDistance {
+                            return base.isEmpty ? entry.distanceText : "\(base) • \(entry.distanceText)"
+                        }
+                        return base
+                    }()
+
+                    if !subText.isEmpty {
+                        Text(subText)
+                            .font(.system(size: subSize, weight: .bold, design: .rounded))
+                            .foregroundColor(inkColor.opacity(0.84))
+                            .lineLimit(1)
+                    }
 
                     HStack(spacing: isLarge ? 16 : 8) {
                         WidgetAvatarView(
@@ -241,7 +272,7 @@ struct CoupleHomeWidgetView: View {
                         )
 
                         Image(systemName: "heart.fill")
-                            .font(.system(size: isLarge ? 18 : 12))
+                            .font(.system(size: isLarge ? 18 : 11))
                             .foregroundColor(Color(hex: entry.config.accentHex))
                             .offset(y: -5)
 
@@ -253,47 +284,54 @@ struct CoupleHomeWidgetView: View {
                             textColor: inkColor
                         )
                     }
-                    .padding(.top, isLarge ? 10 : 4)
+                    .padding(.top, isLarge ? 10 : 3)
                 }
-                .frame(width: radius * 1.55)
-                .position(x: center.x, y: center.y + (isLarge ? 10 : 5))
+                .frame(width: radius * 1.48)
+                .position(x: center.x, y: center.y + (isLarge ? 10 : 4))
             }
         }
         .containerBackground(for: .widget) {
-            Color(hex: entry.config.themeBgHex)
+            arcOrPhotoBackground
         }
     }
 
     @ViewBuilder
-    private var photoOrGradientBackground: some View {
-        if let bg = entry.background {
-            ZStack {
-                Image(uiImage: bg)
+    private var arcOrPhotoBackground: some View {
+        if let photo = activePhoto {
+            GeometryReader { geo in
+                Image(uiImage: photo)
                     .resizable()
                     .scaledToFill()
-                if entry.config.useDarkTextOnPhoto {
-                    Color.white.opacity(entry.config.bgDimOpacity)
-                } else {
-                    Color.black.opacity(entry.config.bgDimOpacity)
-                }
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+                    .overlay(
+                        (entry.config.useDarkTextOnPhoto ? Color.white : Color.black)
+                            .opacity(entry.config.bgDimOpacity)
+                    )
             }
         } else {
-            LinearGradient(
-                colors: [Color(hex: entry.config.themeBgHex).opacity(0.95), Color(hex: "2B2129")],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            Color(hex: entry.config.themeBgHex)
         }
     }
 }
 
-// MARK: - 2. Together Counter Widget (DAYS : HOUR : MIN + Avatars + Photo)
+// MARK: - 2. Together Counter Widget (DAYS : HOUR : MIN)
 struct CoupleCounterWidgetView: View {
     @Environment(\.widgetFamily) var family
     let entry: CoupleEntry
 
+    private var activePhoto: UIImage? {
+        if entry.config.widgetUsePhotoBg {
+            return entry.widgetBackground ?? entry.background
+        }
+        return entry.background
+    }
+
     private var fgColor: Color {
-        entry.config.useDarkTextOnPhoto ? Color(hex: "231817") : .white
+        if activePhoto != nil {
+            return entry.config.useDarkTextOnPhoto ? Color(hex: "231817") : .white
+        }
+        return isDarkHex(entry.config.themeBgHex) ? .white : Color(hex: "2B1D1B")
     }
 
     var body: some View {
@@ -335,23 +373,20 @@ struct CoupleCounterWidgetView: View {
         }
         .padding(10)
         .containerBackground(for: .widget) {
-            if let bg = entry.background {
-                ZStack {
+            if let bg = activePhoto {
+                GeometryReader { geo in
                     Image(uiImage: bg)
                         .resizable()
                         .scaledToFill()
-                    if entry.config.useDarkTextOnPhoto {
-                        Color.white.opacity(entry.config.bgDimOpacity)
-                    } else {
-                        Color.black.opacity(entry.config.bgDimOpacity)
-                    }
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
+                        .overlay(
+                            (entry.config.useDarkTextOnPhoto ? Color.white : Color.black)
+                                .opacity(entry.config.bgDimOpacity)
+                        )
                 }
             } else {
-                LinearGradient(
-                    colors: [Color(hex: "221D29"), Color(hex: "141118")],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                Color(hex: entry.config.themeBgHex)
             }
         }
     }
@@ -431,7 +466,7 @@ struct CoupleHomeWidget: Widget {
             CoupleHomeWidgetView(entry: entry)
         }
         .configurationDisplayName("Been Together (Arc)")
-        .description("Pink horseshoe arc with avatars, months/days, and 0y-1y progress.")
+        .description("Horseshoe arc with avatars, months/days, and 0y-1y progress.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
@@ -444,7 +479,7 @@ struct CoupleCounterWidget: Widget {
             CoupleCounterWidgetView(entry: entry)
         }
         .configurationDisplayName("Together Counter")
-        .description("DAYS : HOUR : MIN counter with wallpaper & distance.")
+        .description("DAYS : HOUR : MIN counter with background & distance.")
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
