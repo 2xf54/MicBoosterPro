@@ -96,6 +96,8 @@ struct CoupleConfig: Codable {
     var themeBgHex: String = "DEB6BE"
     var accentHex: String = "FF7D85"
     var countInclusive: Bool = false
+    var useDarkTextOnPhoto: Bool = false
+    var bgDimOpacity: Double = 0.35
 
     var showDistance: Bool = true
     var city1Name: String = "Riyadh"

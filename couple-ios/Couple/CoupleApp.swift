@@ -101,20 +101,28 @@ struct HomeTabView: View {
     var body: some View {
         ZStack {
             // Background
-            if let bg = store.backgroundImage {
-                Image(uiImage: bg)
-                    .resizable()
-                    .scaledToFill()
-                    .ignoresSafeArea()
-                    .overlay(Color.black.opacity(0.28).ignoresSafeArea())
-            } else {
-                LinearGradient(
-                    colors: [Color(hex: store.config.themeBgHex).opacity(0.85), Color(hex: "2B2129"), Color(hex: "141118")],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
+            // Background locked strictly to screen bounds so bottom bar never shifts or freezes
+            GeometryReader { geo in
+                if let bg = store.backgroundImage {
+                    Image(uiImage: bg)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
+                        .overlay(
+                            (store.config.useDarkTextOnPhoto ? Color.white : Color.black)
+                                .opacity(store.config.bgDimOpacity)
+                        )
+                } else {
+                    LinearGradient(
+                        colors: [Color(hex: store.config.themeBgHex).opacity(0.85), Color(hex: "2B2129"), Color(hex: "141118")],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                }
             }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
 
             VStack {
                 // Top-right customize button
@@ -385,6 +393,14 @@ struct CustomizeThemeSheet: View {
                         } label: {
                             Text("Remove Wallpaper")
                         }
+                    }
+                    Toggle("Dark Text on Photo / Widget", isOn: $store.config.useDarkTextOnPhoto)
+                        .onChange(of: store.config.useDarkTextOnPhoto) { _, _ in store.saveConfig() }
+                    VStack(alignment: .leading) {
+                        Text("Background Overlay: \(Int(store.config.bgDimOpacity * 100))%")
+                            .font(.subheadline)
+                        Slider(value: $store.config.bgDimOpacity, in: 0.0...0.75, step: 0.05)
+                            .onChange(of: store.config.bgDimOpacity) { _, _ in store.saveConfig() }
                     }
                 }
 

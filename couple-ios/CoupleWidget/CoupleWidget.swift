@@ -33,7 +33,6 @@ struct CoupleProvider: TimelineProvider {
         var entries: [CoupleEntry] = []
         let cal = Calendar.current
 
-        // Provide 15-minute timeline entries for the next 2 hours + exact midnight refresh
         for i in 0..<8 {
             let entryDate = now.addingTimeInterval(Double(i) * 900)
             entries.append(makeEntry(for: entryDate))
@@ -73,7 +72,7 @@ struct WidgetAvatarView: View {
     let image: UIImage?
     let name: String
     let size: CGFloat
-    var borderColor: Color = .white.opacity(0.9)
+    var borderColor: Color = .white
     var textColor: Color = .white
 
     var body: some View {
@@ -103,17 +102,18 @@ struct WidgetAvatarView: View {
     }
 }
 
-struct WideArchShape: Shape {
+// Horseshoe arc matching the reference widget (wraps sides & top, leaving center clean)
+struct HorseshoeArcShape: Shape {
     var progress: Double
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        // Wide arch hugging outer edges so center text never overlaps
-        let radius = min(rect.width * 0.43, rect.height * 0.88)
-        let center = CGPoint(x: rect.midX, y: rect.maxY - 6)
-        let startDeg = 188.0
-        let sweepDeg = 164.0
-        let endDeg = startDeg + sweepDeg * max(0.03, min(1.0, progress))
+        let radius = min(rect.width * 0.36, rect.height * 0.47)
+        let center = CGPoint(x: rect.midX, y: rect.midY + rect.height * 0.06)
+        let startDeg = 152.0
+        let sweepDeg = 236.0
+        let clamped = max(0.03, min(1.0, progress))
+        let endDeg = startDeg + sweepDeg * clamped
         path.addArc(
             center: center,
             radius: radius,
@@ -125,35 +125,40 @@ struct WideArchShape: Shape {
     }
 }
 
+// MARK: - 1. Couple Arc & Classic Widget
 struct CoupleHomeWidgetView: View {
     @Environment(\.widgetFamily) var family
     let entry: CoupleEntry
+
+    private var fgColor: Color {
+        entry.config.useDarkTextOnPhoto ? Color(hex: "2B1D1B") : .white
+    }
 
     var body: some View {
         switch family {
         case .systemSmall:
             smallView
         case .systemMedium:
-            mediumArcView
+            arcView(isLarge: false)
         default:
-            largeView
+            arcView(isLarge: true)
         }
     }
 
     private var smallView: some View {
-        VStack(spacing: 5) {
+        VStack(spacing: 4) {
             Image(systemName: "heart.fill")
                 .font(.system(size: 18))
                 .foregroundColor(Color(hex: entry.config.accentHex))
 
             Text("\(entry.totalDays)")
                 .font(.system(size: 36, weight: .heavy, design: .rounded))
-                .foregroundColor(.white)
+                .foregroundColor(fgColor)
                 .minimumScaleFactor(0.6)
 
             Text(entry.totalDays == 1 ? "day" : "days")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.85))
+                .foregroundColor(fgColor.opacity(0.85))
                 .offset(y: -4)
 
             HStack(spacing: 5) {
@@ -164,152 +169,117 @@ struct CoupleHomeWidgetView: View {
                 Text(entry.config.partner2Name)
             }
             .font(.system(size: 11, weight: .bold, design: .rounded))
-            .foregroundColor(.white.opacity(0.92))
+            .foregroundColor(fgColor.opacity(0.92))
         }
         .padding(10)
         .containerBackground(for: .widget) {
-            widgetBackground
+            photoOrGradientBackground
         }
     }
 
-    private var mediumArcView: some View {
-        ZStack {
-            GeometryReader { geo in
-                ZStack {
-                    WideArchShape(progress: 1.0)
-                        .stroke(Color(hex: "4E2E2B").opacity(0.18), style: StrokeStyle(lineWidth: 7, lineCap: .round))
-                    WideArchShape(progress: entry.yearProgress)
-                        .stroke(Color(hex: entry.config.accentHex), style: StrokeStyle(lineWidth: 7, lineCap: .round))
-                }
-                .frame(width: geo.size.width, height: geo.size.height)
-            }
+    private func arcView(isLarge: Bool) -> some View {
+        let inkColor = Color(hex: "4A2A27")
+        let avatarSize: CGFloat = isLarge ? 56 : 36
+        let titleSize: CGFloat = isLarge ? 16 : 11
+        let mainSize: CGFloat = isLarge ? 26 : 17
+        let subSize: CGFloat = isLarge ? 14 : 10
+        let strokeW: CGFloat = isLarge ? 11 : 7
 
-            VStack(spacing: 1) {
-                Spacer(minLength: 14)
+        return GeometryReader { geo in
+            let radius = min(geo.size.width * 0.36, geo.size.height * 0.47)
+            let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2 + geo.size.height * 0.06)
 
-                Text(entry.config.widgetTitle)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundColor(Color(hex: "4E2E2B"))
-                    .lineLimit(1)
+            ZStack {
+                // Background track & active progress arc
+                HorseshoeArcShape(progress: 1.0)
+                    .stroke(inkColor.opacity(0.18), style: StrokeStyle(lineWidth: strokeW, lineCap: .round))
+                HorseshoeArcShape(progress: entry.yearProgress)
+                    .stroke(Color(hex: entry.config.accentHex), style: StrokeStyle(lineWidth: strokeW, lineCap: .round))
 
-                Text("\(entry.months) Month \(entry.daysRemainder) Day")
-                    .font(.system(size: 18, weight: .heavy, design: .rounded))
-                    .foregroundColor(Color(hex: "4E2E2B"))
-                    .minimumScaleFactor(0.7)
-                    .lineLimit(1)
-
-                Text(entry.config.showDistance
-                     ? "\(entry.totalDays)d • \(entry.daysUntilNextYear)d to \(entry.yearFloor + 1)y • \(entry.distanceText)"
-                     : "\(entry.totalDays)d • \(entry.daysUntilNextYear)d to \(entry.yearFloor + 1)y")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundColor(Color(hex: "4E2E2B").opacity(0.75))
-                    .lineLimit(1)
-                    .padding(.horizontal, 42)
-
-                HStack(spacing: 12) {
-                    Text("\(entry.yearFloor)y")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundColor(Color(hex: "4E2E2B").opacity(0.65))
-
-                    Spacer()
-
-                    WidgetAvatarView(
-                        image: entry.avatar1,
-                        name: entry.config.partner1Name,
-                        size: 38,
-                        borderColor: .white,
-                        textColor: Color(hex: "4E2E2B")
+                // 0y and 1y labels positioned right under the arc tips
+                Text("\(entry.yearFloor)y")
+                    .font(.system(size: isLarge ? 13 : 10, weight: .bold, design: .rounded))
+                    .foregroundColor(inkColor.opacity(0.65))
+                    .position(
+                        x: center.x - radius * 0.88,
+                        y: center.y + radius * 0.62
                     )
 
-                    Image(systemName: "heart.fill")
-                        .font(.system(size: 13))
-                        .foregroundColor(Color(hex: entry.config.accentHex))
-                        .offset(y: -5)
-
-                    WidgetAvatarView(
-                        image: entry.avatar2,
-                        name: entry.config.partner2Name,
-                        size: 38,
-                        borderColor: .white,
-                        textColor: Color(hex: "4E2E2B")
+                Text("\(entry.yearFloor + 1)y")
+                    .font(.system(size: isLarge ? 13 : 10, weight: .bold, design: .rounded))
+                    .foregroundColor(inkColor.opacity(0.65))
+                    .position(
+                        x: center.x + radius * 0.88,
+                        y: center.y + radius * 0.62
                     )
 
-                    Spacer()
+                // Center content cleanly inside the horseshoe
+                VStack(spacing: isLarge ? 6 : 2) {
+                    Text(entry.config.widgetTitle)
+                        .font(.system(size: titleSize, weight: .bold, design: .rounded))
+                        .foregroundColor(inkColor)
+                        .lineLimit(1)
 
-                    Text("\(entry.yearFloor + 1)y")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundColor(Color(hex: "4E2E2B").opacity(0.65))
+                    Text("\(entry.months)Month \(entry.daysRemainder)Day")
+                        .font(.system(size: mainSize, weight: .heavy, design: .rounded))
+                        .foregroundColor(inkColor)
+                        .minimumScaleFactor(0.7)
+                        .lineLimit(1)
+
+                    Text(entry.config.showDistance ? "\(entry.config.widgetSubtitle) • \(entry.distanceText)" : entry.config.widgetSubtitle)
+                        .font(.system(size: subSize, weight: .bold, design: .rounded))
+                        .foregroundColor(inkColor.opacity(0.82))
+                        .lineLimit(1)
+
+                    HStack(spacing: isLarge ? 16 : 8) {
+                        WidgetAvatarView(
+                            image: entry.avatar1,
+                            name: entry.config.partner1Name,
+                            size: avatarSize,
+                            borderColor: .white,
+                            textColor: inkColor
+                        )
+
+                        Image(systemName: "heart.fill")
+                            .font(.system(size: isLarge ? 18 : 12))
+                            .foregroundColor(Color(hex: entry.config.accentHex))
+                            .offset(y: -5)
+
+                        WidgetAvatarView(
+                            image: entry.avatar2,
+                            name: entry.config.partner2Name,
+                            size: avatarSize,
+                            borderColor: .white,
+                            textColor: inkColor
+                        )
+                    }
+                    .padding(.top, isLarge ? 10 : 4)
                 }
-                .padding(.horizontal, 12)
-                .padding(.top, 3)
+                .frame(width: radius * 1.55)
+                .position(x: center.x, y: center.y + (isLarge ? 10 : 5))
             }
-            .padding(.bottom, 6)
         }
         .containerBackground(for: .widget) {
             Color(hex: entry.config.themeBgHex)
         }
     }
 
-    private var largeView: some View {
-        VStack(spacing: 10) {
-            Spacer()
-
-            Text(entry.config.homeTitle)
-                .font(.system(size: 15, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.9))
-
-            Text("\(entry.totalDays) days")
-                .font(.system(size: 42, weight: .heavy, design: .rounded))
-                .foregroundColor(.white)
-                .minimumScaleFactor(0.6)
-
-            Text("\(entry.months) Month \(entry.daysRemainder) Day • \(entry.daysUntilNextYear)d left for \(entry.yearFloor + 1)y")
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.86))
-
-            Text(entry.startDateFormatted)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.8))
-
-            if entry.config.showDistance {
-                Label("\(entry.config.city1Name) ↔ \(entry.config.city2Name) • \(entry.distanceText)", systemImage: "location.fill")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Capsule().fill(Color.black.opacity(0.35)))
-            }
-
-            Spacer()
-
-            HStack(spacing: 26) {
-                WidgetAvatarView(image: entry.avatar1, name: entry.config.partner1Name, size: 54)
-                Image(systemName: "heart.fill")
-                    .font(.system(size: 20))
-                    .foregroundColor(.white)
-                    .offset(y: -8)
-                WidgetAvatarView(image: entry.avatar2, name: entry.config.partner2Name, size: 54)
-            }
-            .padding(.bottom, 12)
-        }
-        .padding()
-        .containerBackground(for: .widget) {
-            widgetBackground
-        }
-    }
-
     @ViewBuilder
-    private var widgetBackground: some View {
+    private var photoOrGradientBackground: some View {
         if let bg = entry.background {
             ZStack {
                 Image(uiImage: bg)
                     .resizable()
                     .scaledToFill()
-                Color.black.opacity(0.32)
+                if entry.config.useDarkTextOnPhoto {
+                    Color.white.opacity(entry.config.bgDimOpacity)
+                } else {
+                    Color.black.opacity(entry.config.bgDimOpacity)
+                }
             }
         } else {
             LinearGradient(
-                colors: [Color(hex: entry.config.themeBgHex).opacity(0.9), Color(hex: "2B2129")],
+                colors: [Color(hex: entry.config.themeBgHex).opacity(0.95), Color(hex: "2B2129")],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -317,6 +287,95 @@ struct CoupleHomeWidgetView: View {
     }
 }
 
+// MARK: - 2. Together Counter Widget (DAYS : HOUR : MIN + Avatars + Photo)
+struct CoupleCounterWidgetView: View {
+    @Environment(\.widgetFamily) var family
+    let entry: CoupleEntry
+
+    private var fgColor: Color {
+        entry.config.useDarkTextOnPhoto ? Color(hex: "231817") : .white
+    }
+
+    var body: some View {
+        VStack(spacing: family == .systemSmall ? 4 : 8) {
+            Text(entry.config.homeTitle)
+                .font(.system(size: family == .systemSmall ? 11 : 13, weight: .semibold, design: .rounded))
+                .foregroundColor(fgColor.opacity(0.88))
+
+            if family == .systemSmall {
+                Text("\(entry.totalDays)")
+                    .font(.system(size: 34, weight: .heavy, design: .rounded))
+                    .foregroundColor(fgColor)
+                Text("DAYS")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundColor(fgColor.opacity(0.75))
+                Text("\(entry.daysUntilNextYear)d to \(entry.yearFloor + 1)y")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundColor(fgColor.opacity(0.85))
+            } else {
+                HStack(spacing: 12) {
+                    CounterCol(val: "\(entry.totalDays)", label: "DAYS", color: fgColor)
+                    Text(":").font(.system(size: 22, weight: .bold)).foregroundColor(fgColor.opacity(0.5)).offset(y: -6)
+                    CounterCol(val: String(format: "%02d", entry.hours), label: "HOUR", color: fgColor)
+                    Text(":").font(.system(size: 22, weight: .bold)).foregroundColor(fgColor.opacity(0.5)).offset(y: -6)
+                    CounterCol(val: String(format: "%02d", entry.minutes), label: "MIN", color: fgColor)
+                }
+
+                HStack(spacing: 6) {
+                    Text("\(entry.config.partner1Name) ♥ \(entry.config.partner2Name)")
+                    Text("• \(entry.daysUntilNextYear)d to \(entry.yearFloor + 1)y")
+                    if entry.config.showDistance {
+                        Text("• \(entry.distanceText)")
+                    }
+                }
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundColor(fgColor.opacity(0.88))
+                .lineLimit(1)
+            }
+        }
+        .padding(10)
+        .containerBackground(for: .widget) {
+            if let bg = entry.background {
+                ZStack {
+                    Image(uiImage: bg)
+                        .resizable()
+                        .scaledToFill()
+                    if entry.config.useDarkTextOnPhoto {
+                        Color.white.opacity(entry.config.bgDimOpacity)
+                    } else {
+                        Color.black.opacity(entry.config.bgDimOpacity)
+                    }
+                }
+            } else {
+                LinearGradient(
+                    colors: [Color(hex: "221D29"), Color(hex: "141118")],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
+        }
+    }
+}
+
+private struct CounterCol: View {
+    let val: String
+    let label: String
+    let color: Color
+
+    var body: some View {
+        VStack(spacing: 1) {
+            Text(val)
+                .font(.system(size: 26, weight: .heavy, design: .rounded))
+                .foregroundColor(color)
+                .monospacedDigit()
+            Text(label)
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .foregroundColor(color.opacity(0.75))
+        }
+    }
+}
+
+// MARK: - 3. Lock Screen Widget
 struct CoupleLockWidgetView: View {
     @Environment(\.widgetFamily) var family
     let entry: CoupleEntry
@@ -333,9 +392,7 @@ struct CoupleLockWidgetView: View {
                 Text("days")
                     .font(.system(size: 9, weight: .medium, design: .rounded))
             }
-            .containerBackground(for: .widget) {
-                Color.clear
-            }
+            .containerBackground(for: .widget) { Color.clear }
 
         case .accessoryRectangular:
             VStack(alignment: .leading, spacing: 2) {
@@ -357,15 +414,11 @@ struct CoupleLockWidgetView: View {
                 .opacity(0.8)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .containerBackground(for: .widget) {
-                Color.clear
-            }
+            .containerBackground(for: .widget) { Color.clear }
 
         default:
             Text("♥ \(entry.totalDays) days • \(entry.config.partner1Name) & \(entry.config.partner2Name)")
-                .containerBackground(for: .widget) {
-                    Color.clear
-                }
+                .containerBackground(for: .widget) { Color.clear }
         }
     }
 }
@@ -377,9 +430,22 @@ struct CoupleHomeWidget: Widget {
         StaticConfiguration(kind: kind, provider: CoupleProvider()) { entry in
             CoupleHomeWidgetView(entry: entry)
         }
-        .configurationDisplayName("The Couple")
-        .description("Days together, avatars, arc progress, and distance.")
+        .configurationDisplayName("Been Together (Arc)")
+        .description("Pink horseshoe arc with avatars, months/days, and 0y-1y progress.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
+    }
+}
+
+struct CoupleCounterWidget: Widget {
+    let kind: String = "CoupleCounterWidget"
+
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: kind, provider: CoupleProvider()) { entry in
+            CoupleCounterWidgetView(entry: entry)
+        }
+        .configurationDisplayName("Together Counter")
+        .description("DAYS : HOUR : MIN counter with wallpaper & distance.")
+        .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
 
@@ -400,6 +466,7 @@ struct CoupleLockWidget: Widget {
 struct CoupleWidgetBundle: WidgetBundle {
     var body: some Widget {
         CoupleHomeWidget()
+        CoupleCounterWidget()
         CoupleLockWidget()
     }
 }
