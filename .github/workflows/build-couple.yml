@@ -1,0 +1,53 @@
+name: Build The Couple iOS IPA
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - "couple-ios/**"
+      - ".github/workflows/build-couple.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-couple:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project & Archive
+        working-directory: couple-ios
+        run: |
+          xcodegen generate
+          xcodebuild archive \
+            -project Couple.xcodeproj \
+            -scheme Couple \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/Couple.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package Payload into TheCouple.ipa
+        working-directory: couple-ios
+        run: |
+          mkdir -p Payload
+          cp -r build/Couple.xcarchive/Products/Applications/Couple.app Payload/
+          zip -r ../TheCouple.ipa Payload
+
+      - name: Publish TheCouple.ipa Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: couple-latest
+          name: "The Couple iOS App (Latest)"
+          body: "The Couple iOS App + Home & Lock Screen Widgets"
+          files: TheCouple.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
