@@ -143,20 +143,38 @@ struct HomeTabView: View {
                         .foregroundColor(.white.opacity(0.92))
                         .shadow(color: .black.opacity(0.35), radius: 4)
 
-                    Text(counterTitle)
-                        .font(.system(size: displayMode == 2 ? 32 : 52, weight: .heavy, design: .rounded))
-                        .foregroundColor(.white)
-                        .minimumScaleFactor(0.6)
-                        .lineLimit(1)
-                        .shadow(color: .black.opacity(0.4), radius: 8)
+                    if displayMode == 2 {
+                        let p = store.elapsedTimeParts(at: now)
+                        HStack(spacing: 14) {
+                            TimerUnitColumn(value: "\(p.days)", label: "DAYS")
+                            Text(":").font(.system(size: 26, weight: .bold)).foregroundColor(.white.opacity(0.6)).offset(y: -8)
+                            TimerUnitColumn(value: String(format: "%02d", p.hours), label: "HOUR")
+                            Text(":").font(.system(size: 26, weight: .bold)).foregroundColor(.white.opacity(0.6)).offset(y: -8)
+                            TimerUnitColumn(value: String(format: "%02d", p.minutes), label: "MIN")
+                            Text(":").font(.system(size: 26, weight: .bold)).foregroundColor(.white.opacity(0.6)).offset(y: -8)
+                            TimerUnitColumn(value: String(format: "%02d", p.seconds), label: "SEC")
+                        }
                         .onTapGesture {
                             withAnimation(.easeInOut(duration: 0.2)) {
                                 displayMode = (displayMode + 1) % 3
                             }
                         }
+                    } else {
+                        Text(counterTitle)
+                            .font(.system(size: 52, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                            .minimumScaleFactor(0.6)
+                            .lineLimit(1)
+                            .shadow(color: .black.opacity(0.4), radius: 8)
+                            .onTapGesture {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    displayMode = (displayMode + 1) % 3
+                                }
+                            }
+                    }
 
-                    Text(store.formattedStartDate())
-                        .font(.system(size: 15, weight: .medium, design: .rounded))
+                    Text("\(store.formattedStartDate()) • \(store.daysUntilNextYear(at: now))d until \(store.currentYearFloor(at: now) + 1)y")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.88))
                         .shadow(color: .black.opacity(0.35), radius: 4)
 
@@ -225,6 +243,23 @@ struct HomeTabView: View {
         default:
             let d = store.totalDays(at: now)
             return d == 1 ? "1 day" : "\(d) days"
+        }
+    }
+}
+
+private struct TimerUnitColumn: View {
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 30, weight: .heavy, design: .rounded))
+                .foregroundColor(.white)
+                .monospacedDigit()
+            Text(label)
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.75))
         }
     }
 }
@@ -583,13 +618,17 @@ struct MySettingsTabView: View {
     @StateObject private var locHelper = LocationHelper()
     @State private var p1Item: PhotosPickerItem?
     @State private var p2Item: PhotosPickerItem?
+    @State private var pickingCityFor: Int? = nil
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("Anniversary Date") {
                     DatePicker("Together Since", selection: $store.config.startDate, displayedComponents: .date)
-                        .onChange(of: store.config.startDate) { _, _ in store.saveConfig() }
+                        .onChange(of: store.config.startDate) { _, newVal in
+                            store.config.startDate = Calendar.current.startOfDay(for: newVal)
+                            store.saveConfig()
+                        }
                     Toggle("Include Start Day (+1)", isOn: $store.config.countInclusive)
                         .onChange(of: store.config.countInclusive) { _, _ in store.saveConfig() }
                 }
@@ -612,16 +651,15 @@ struct MySettingsTabView: View {
                     Toggle("Show Distance", isOn: $store.config.showDistance)
                         .onChange(of: store.config.showDistance) { _, _ in store.saveConfig() }
 
-                    Picker("Your City", selection: $store.config.city1Name) {
-                        ForEach(CityPreset.presets) { c in
-                            Text(c.name).tag(c.name)
-                        }
-                    }
-                    .onChange(of: store.config.city1Name) { _, newName in
-                        if let c = CityPreset.presets.first(where: { $0.name == newName }) {
-                            store.config.city1Lat = c.lat
-                            store.config.city1Lon = c.lon
-                            store.saveConfig()
+                    Button {
+                        pickingCityFor = 1
+                    } label: {
+                        HStack {
+                            Text("Your City")
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Text(store.config.city1Name)
+                                .foregroundColor(.secondary)
                         }
                     }
 
@@ -636,16 +674,15 @@ struct MySettingsTabView: View {
                         Label("Use My Current GPS Location", systemImage: "location.circle.fill")
                     }
 
-                    Picker("Partner City", selection: $store.config.city2Name) {
-                        ForEach(CityPreset.presets) { c in
-                            Text(c.name).tag(c.name)
-                        }
-                    }
-                    .onChange(of: store.config.city2Name) { _, newName in
-                        if let c = CityPreset.presets.first(where: { $0.name == newName }) {
-                            store.config.city2Lat = c.lat
-                            store.config.city2Lon = c.lon
-                            store.saveConfig()
+                    Button {
+                        pickingCityFor = 2
+                    } label: {
+                        HStack {
+                            Text("Partner City")
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Text(store.config.city2Name)
+                                .foregroundColor(.secondary)
                         }
                     }
 
@@ -665,13 +702,26 @@ struct MySettingsTabView: View {
                     } label: {
                         Label("Refresh All Widgets Now", systemImage: "arrow.clockwise")
                     }
-                    Text("Tip: Install directly with Sideloadly (keep app extensions) so Home & Lock Screen widgets appear.")
+                    HStack {
+                        Text("Widget Sync (App Group)")
+                        Spacer()
+                        Text(store.isAppGroupAvailable ? "Connected" : "Fallback Mode")
+                            .font(.caption.bold())
+                            .foregroundColor(store.isAppGroupAvailable ? .green : .orange)
+                    }
+                    Text("If avatars don't appear in the widget right away, tap Refresh above or re-add the widget once.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
             }
             .contentMargins(.bottom, 90, for: .scrollContent)
             .navigationTitle("My")
+            .sheet(item: Binding(
+                get: { pickingCityFor.map { PartnerSheetItem(id: $0) } },
+                set: { pickingCityFor = $0?.id }
+            )) { item in
+                CityPickerSheet(partnerIndex: item.id)
+            }
             .onChange(of: p1Item) { _, newItem in
                 Task {
                     if let data = try? await newItem?.loadTransferable(type: Data.self),
@@ -690,6 +740,60 @@ struct MySettingsTabView: View {
                             store.saveImage(img, named: "avatar2.jpg", maxDimension: 400)
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+struct CityPickerSheet: View {
+    @EnvironmentObject var store: CoupleStore
+    @Environment(\.dismiss) var dismiss
+    let partnerIndex: Int
+    @State private var query: String = ""
+
+    private var filtered: [CityPreset] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if q.isEmpty { return CityPreset.presets }
+        return CityPreset.presets.filter {
+            $0.name.localizedCaseInsensitiveContains(q) || $0.arabicName.contains(q)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List(filtered) { city in
+                Button {
+                    if partnerIndex == 1 {
+                        store.config.city1Name = city.name
+                        store.config.city1Lat = city.lat
+                        store.config.city1Lon = city.lon
+                    } else {
+                        store.config.city2Name = city.name
+                        store.config.city2Lat = city.lat
+                        store.config.city2Lon = city.lon
+                    }
+                    store.saveConfig()
+                    dismiss()
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(city.name).foregroundColor(.primary)
+                            Text(city.arabicName).font(.caption).foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        let current = partnerIndex == 1 ? store.config.city1Name : store.config.city2Name
+                        if current == city.name {
+                            Image(systemName: "checkmark").foregroundColor(.pink)
+                        }
+                    }
+                }
+            }
+            .searchable(text: $query, prompt: "Search city (e.g. الخرج / Jazan / Riyadh)")
+            .navigationTitle(partnerIndex == 1 ? "Your City" : "Partner City")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
                 }
             }
         }
