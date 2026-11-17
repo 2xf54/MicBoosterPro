@@ -639,10 +639,9 @@ struct MySettingsTabView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Anniversary Date") {
-                    DatePicker("Together Since", selection: $store.config.startDate, displayedComponents: .date)
-                        .onChange(of: store.config.startDate) { _, newVal in
-                            store.config.startDate = Calendar.current.startOfDay(for: newVal)
+                Section("Anniversary Date & Time") {
+                    DatePicker("Together Since", selection: $store.config.startDate, displayedComponents: [.date, .hourAndMinute])
+                        .onChange(of: store.config.startDate) { _, _ in
                             store.saveConfig()
                         }
                     Toggle("Include Start Day (+1)", isOn: $store.config.countInclusive)
@@ -725,7 +724,7 @@ struct MySettingsTabView: View {
                             .font(.caption.bold())
                             .foregroundColor(store.isAppGroupAvailable ? .green : .orange)
                     }
-                    Text("If avatars don't appear in the widget right away, tap Refresh above or re-add the widget once.")
+                    Text("The Couple v1.3 • If avatars don't appear in the widget right away, tap Refresh above or re-add the widget once.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

@@ -41,13 +41,16 @@ jobs:
           mkdir -p Payload
           cp -r build/Couple.xcarchive/Products/Applications/Couple.app Payload/
           zip -r ../TheCouple.ipa Payload
+          cp ../TheCouple.ipa ../TheCouple_v1.3.ipa
 
       - name: Publish TheCouple.ipa Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: couple-latest
-          name: "The Couple iOS App (Latest)"
-          body: "The Couple iOS App + Home & Lock Screen Widgets"
-          files: TheCouple.ipa
+          name: "The Couple iOS App (v1.3)"
+          body: "The Couple iOS App v1.3 + Home & Lock Screen Widgets"
+          files: |
+            TheCouple.ipa
+            TheCouple_v1.3.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

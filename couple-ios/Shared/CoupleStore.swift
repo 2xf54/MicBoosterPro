@@ -87,7 +87,7 @@ struct CityPreset: Identifiable, Hashable {
 }
 
 struct CoupleConfig: Codable {
-    var startDate: Date = Calendar.current.startOfDay(for: Calendar.current.date(byAdding: .day, value: -120, to: Date()) ?? Date())
+    var startDate: Date = Calendar.current.date(byAdding: .day, value: -120, to: Date()) ?? Date()
     var partner1Name: String = "G"
     var partner2Name: String = "R"
     var homeTitle: String = "Together for"
@@ -225,18 +225,14 @@ final class CoupleStore: ObservableObject {
     // MARK: - Date & Distance Calculations
 
     func totalDays(at date: Date = Date()) -> Int {
-        let cal = Calendar.current
-        let start = cal.startOfDay(for: config.startDate)
-        let end = cal.startOfDay(for: date)
-        let diff = cal.dateComponents([.day], from: start, to: end).day ?? 0
-        return max(0, diff + (config.countInclusive ? 1 : 0))
+        let totalSec = max(0, Int(date.timeIntervalSince(config.startDate)))
+        let d = totalSec / 86400
+        return max(0, d + (config.countInclusive ? 1 : 0))
     }
 
     func elapsedTimeParts(at date: Date = Date()) -> (days: Int, hours: Int, minutes: Int, seconds: Int) {
-        let cal = Calendar.current
-        let start = cal.startOfDay(for: config.startDate)
-        let totalSec = max(0, Int(date.timeIntervalSince(start)))
-        let d = totalDays(at: date)
+        let totalSec = max(0, Int(date.timeIntervalSince(config.startDate)))
+        let d = (totalSec / 86400) + (config.countInclusive ? 1 : 0)
         let h = (totalSec % 86400) / 3600
         let m = (totalSec % 3600) / 60
         let s = totalSec % 60
@@ -282,7 +278,7 @@ final class CoupleStore: ObservableObject {
     func formattedStartDate() -> String {
         let df = DateFormatter()
         df.dateStyle = .medium
-        df.timeStyle = .none
+        df.timeStyle = .short
         return df.string(from: config.startDate)
     }
 
