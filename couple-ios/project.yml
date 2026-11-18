@@ -22,8 +22,8 @@ targets:
       path: Couple/Info.plist
       properties:
         CFBundleDisplayName: "The Couple"
-        CFBundleShortVersionString: "1.4"
-        CFBundleVersion: "5"
+        CFBundleShortVersionString: "1.5"
+        CFBundleVersion: "6"
         LSRequiresIPhoneOS: true
         UIUserInterfaceStyle: Dark
         NSLocationWhenInUseUsageDescription: "Used to calculate the distance between you and your partner."
@@ -58,8 +58,8 @@ targets:
       path: CoupleWidget/Info.plist
       properties:
         CFBundleDisplayName: "Couple Widget"
-        CFBundleShortVersionString: "1.4"
-        CFBundleVersion: "5"
+        CFBundleShortVersionString: "1.5"
+        CFBundleVersion: "6"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:

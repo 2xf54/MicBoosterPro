@@ -1,5 +1,112 @@
 import WidgetKit
 import SwiftUI
+import AppIntents
+
+enum WidgetThemeColor: String, AppEnum {
+    case rosePink = "DEB6BE"
+    case pureWhite = "FFFFFF"
+    case softCream = "F7EFE5"
+    case softPeach = "E8C3B9"
+    case lavender = "C8BFE7"
+    case skyBlue = "B8D8EB"
+    case midnight = "161824"
+    case crimson = "2A1219"
+
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Theme Color"
+    static var caseDisplayRepresentations: [WidgetThemeColor: DisplayRepresentation] = [
+        .rosePink: "Rose Pink",
+        .pureWhite: "Pure White",
+        .softCream: "Soft Cream",
+        .softPeach: "Soft Peach",
+        .lavender: "Lavender",
+        .skyBlue: "Sky Blue",
+        .midnight: "Midnight",
+        .crimson: "Crimson Night"
+    ]
+}
+
+enum WidgetCityChoice: String, AppEnum {
+    case riyadh = "Riyadh"
+    case alkharj = "Al-Kharj"
+    case jeddah = "Jeddah"
+    case makkah = "Makkah"
+    case madinah = "Madinah"
+    case dammam = "Dammam"
+    case khobar = "Khobar"
+    case jazan = "Jazan"
+    case abha = "Abha"
+    case najran = "Najran"
+    case taif = "Taif"
+    case tabuk = "Tabuk"
+    case hail = "Hail"
+    case buraydah = "Buraydah"
+    case yanbu = "Yanbu"
+    case jubail = "Jubail"
+    case alahsa = "Al-Ahsa"
+    case dubai = "Dubai"
+    case doha = "Doha"
+    case kuwait = "Kuwait City"
+    case cairo = "Cairo"
+    case london = "London"
+
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "City"
+    static var caseDisplayRepresentations: [WidgetCityChoice: DisplayRepresentation] = [
+        .riyadh: "Riyadh (الرياض)",
+        .alkharj: "Al-Kharj (الخرج)",
+        .jeddah: "Jeddah (جدة)",
+        .makkah: "Makkah (مكة)",
+        .madinah: "Madinah (المدينة)",
+        .dammam: "Dammam (الدمام)",
+        .khobar: "Khobar (الخبر)",
+        .jazan: "Jazan (جازان)",
+        .abha: "Abha (أبها)",
+        .najran: "Najran (نجران)",
+        .taif: "Taif (الطائف)",
+        .tabuk: "Tabuk (تبوك)",
+        .hail: "Hail (حائل)",
+        .buraydah: "Buraydah (بريدة)",
+        .yanbu: "Yanbu (ينبع)",
+        .jubail: "Jubail (الجبيل)",
+        .alahsa: "Al-Ahsa (الأحساء)",
+        .dubai: "Dubai (دبي)",
+        .doha: "Doha (الدوحة)",
+        .kuwait: "Kuwait (الكويت)",
+        .cairo: "Cairo (القاهرة)",
+        .london: "London (لندن)"
+    ]
+}
+
+struct CoupleWidgetIntent: WidgetConfigurationIntent {
+    static var title: LocalizedStringResource = "Couple Widget Settings"
+    static var description = IntentDescription("Customize date, names, subtitle, color, and cities directly on the widget.")
+
+    @Parameter(title: "Start Date")
+    var startDate: Date?
+
+    @Parameter(title: "Your Name", default: "G")
+    var partner1Name: String
+
+    @Parameter(title: "Partner Name", default: "R")
+    var partner2Name: String
+
+    @Parameter(title: "Title", default: "Been together 🐰")
+    var widgetTitle: String
+
+    @Parameter(title: "Subtitle", default: "GRG")
+    var widgetSubtitle: String
+
+    @Parameter(title: "Background Color", default: .rosePink)
+    var themeColor: WidgetThemeColor
+
+    @Parameter(title: "Show Distance", default: true)
+    var showDistance: Bool
+
+    @Parameter(title: "Your City", default: .riyadh)
+    var city1: WidgetCityChoice
+
+    @Parameter(title: "Partner City", default: .jeddah)
+    var city2: WidgetCityChoice
+}
 
 struct CoupleEntry: TimelineEntry {
     let date: Date
@@ -20,48 +127,77 @@ struct CoupleEntry: TimelineEntry {
     let widgetBackground: UIImage?
 }
 
-struct CoupleProvider: TimelineProvider {
+struct CoupleIntentProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> CoupleEntry {
-        makeEntry(for: Date())
+        makeEntry(for: Date(), intent: CoupleWidgetIntent())
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (CoupleEntry) -> Void) {
-        completion(makeEntry(for: Date()))
+    func snapshot(for configuration: CoupleWidgetIntent, in context: Context) async -> CoupleEntry {
+        makeEntry(for: Date(), intent: configuration)
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<CoupleEntry>) -> Void) {
+    func timeline(for configuration: CoupleWidgetIntent, in context: Context) async -> Timeline<CoupleEntry> {
         let now = Date()
         var entries: [CoupleEntry] = []
         let cal = Calendar.current
 
         for i in 0..<8 {
             let entryDate = now.addingTimeInterval(Double(i) * 900)
-            entries.append(makeEntry(for: entryDate))
+            entries.append(makeEntry(for: entryDate, intent: configuration))
         }
 
         let tomorrow = cal.startOfDay(for: cal.date(byAdding: .day, value: 1, to: now) ?? now.addingTimeInterval(86400))
         let nextRefresh = min(tomorrow, now.addingTimeInterval(7200))
-        completion(Timeline(entries: entries, policy: .after(nextRefresh)))
+        return Timeline(entries: entries, policy: .after(nextRefresh))
     }
 
-    private func makeEntry(for date: Date) -> CoupleEntry {
+    private func makeEntry(for date: Date, intent: CoupleWidgetIntent) -> CoupleEntry {
         let store = CoupleStore.shared
         store.reload()
-        let md = store.monthsAndDays(at: date)
-        let parts = store.elapsedTimeParts(at: date)
+
+        // If App Group is not linked, or user explicitly set a Start Date in Edit Widget, apply intent values
+        var effectiveConfig = store.config
+        if !store.isAppGroupAvailable || intent.startDate != nil {
+            if let sd = intent.startDate {
+                effectiveConfig.startDate = sd
+            }
+            effectiveConfig.partner1Name = intent.partner1Name
+            effectiveConfig.partner2Name = intent.partner2Name
+            effectiveConfig.widgetTitle = intent.widgetTitle
+            effectiveConfig.widgetSubtitle = intent.widgetSubtitle
+            effectiveConfig.themeBgHex = intent.themeColor.rawValue
+            effectiveConfig.showDistance = intent.showDistance
+            if let c1 = CityPreset.presets.first(where: { $0.name == intent.city1.rawValue }) {
+                effectiveConfig.city1Name = c1.name
+                effectiveConfig.city1Lat = c1.lat
+                effectiveConfig.city1Lon = c1.lon
+            }
+            if let c2 = CityPreset.presets.first(where: { $0.name == intent.city2.rawValue }) {
+                effectiveConfig.city2Name = c2.name
+                effectiveConfig.city2Lat = c2.lat
+                effectiveConfig.city2Lon = c2.lon
+            }
+        }
+
+        // Compute values using effectiveConfig
+        let tempStore = CoupleStore()
+        tempStore.config = effectiveConfig
+        let md = tempStore.monthsAndDays(at: date)
+        let parts = tempStore.elapsedTimeParts(at: date)
+
         return CoupleEntry(
             date: date,
-            config: store.config,
+            config: effectiveConfig,
             totalDays: parts.days,
             hours: parts.hours,
             minutes: parts.minutes,
             months: md.months,
             daysRemainder: md.days,
-            daysUntilNextYear: store.daysUntilNextYear(at: date),
-            yearProgress: store.yearProgress(at: date),
-            yearFloor: store.currentYearFloor(at: date),
-            startDateFormatted: store.formattedStartDate(),
-            distanceText: store.formattedDistance(),
+            daysUntilNextYear: tempStore.daysUntilNextYear(at: date),
+            yearProgress: tempStore.yearProgress(at: date),
+            yearFloor: tempStore.currentYearFloor(at: date),
+            startDateFormatted: tempStore.formattedStartDate(),
+            distanceText: tempStore.formattedDistance(),
             avatar1: store.avatar1Image,
             avatar2: store.avatar2Image,
             background: store.backgroundImage,
@@ -211,13 +347,11 @@ struct CoupleHomeWidgetView: View {
             let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2 + geo.size.height * 0.04)
 
             ZStack {
-                // Arc track & active progress
                 HorseshoeArcShape(progress: 1.0)
                     .stroke(inkColor.opacity(0.18), style: StrokeStyle(lineWidth: strokeW, lineCap: .round))
                 HorseshoeArcShape(progress: entry.yearProgress)
                     .stroke(Color(hex: entry.config.accentHex), style: StrokeStyle(lineWidth: strokeW, lineCap: .round))
 
-                // 0y and 1y placed clearly outside the arc tips so they NEVER touch avatars
                 Text("\(entry.yearFloor)y")
                     .font(.system(size: isLarge ? 13 : 10, weight: .bold, design: .rounded))
                     .foregroundColor(inkColor.opacity(0.72))
@@ -234,7 +368,6 @@ struct CoupleHomeWidgetView: View {
                         y: center.y + radius * 0.48
                     )
 
-                // Center content cleanly inside the arch
                 VStack(spacing: isLarge ? 6 : 2) {
                     Text(entry.config.widgetTitle)
                         .font(.system(size: titleSize, weight: .bold, design: .rounded))
@@ -462,11 +595,11 @@ struct CoupleHomeWidget: Widget {
     let kind: String = "CoupleHomeWidget"
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: CoupleProvider()) { entry in
+        AppIntentConfiguration(kind: kind, intent: CoupleWidgetIntent.self, provider: CoupleIntentProvider()) { entry in
             CoupleHomeWidgetView(entry: entry)
         }
         .configurationDisplayName("Been Together (Arc)")
-        .description("Horseshoe arc with avatars, months/days, and 0y-1y progress.")
+        .description("Hold widget -> Edit Widget to set date, names, subtitle, color & cities.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
@@ -475,11 +608,11 @@ struct CoupleCounterWidget: Widget {
     let kind: String = "CoupleCounterWidget"
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: CoupleProvider()) { entry in
+        AppIntentConfiguration(kind: kind, intent: CoupleWidgetIntent.self, provider: CoupleIntentProvider()) { entry in
             CoupleCounterWidgetView(entry: entry)
         }
         .configurationDisplayName("Together Counter")
-        .description("DAYS : HOUR : MIN counter with background & distance.")
+        .description("DAYS : HOUR : MIN counter. Hold widget -> Edit Widget to customize.")
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
@@ -488,7 +621,7 @@ struct CoupleLockWidget: Widget {
     let kind: String = "CoupleLockWidget"
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: CoupleProvider()) { entry in
+        AppIntentConfiguration(kind: kind, intent: CoupleWidgetIntent.self, provider: CoupleIntentProvider()) { entry in
             CoupleLockWidgetView(entry: entry)
         }
         .configurationDisplayName("Couple Lock Screen")
